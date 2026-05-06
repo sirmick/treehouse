@@ -111,6 +111,75 @@ has a default route only via the management interface; the kids' bridge
 explicitly does not. Once provisioned, the management interface can be
 brought down for production runs (`make seal` flips it off).
 
+## Development DNS
+
+The architecture rests on Caddy doing host-header routing —
+`wikipedia.kids`, `khan.kids`, `home.kids`, all on port 80. Falling
+back to `localhost:8080`-style URLs in dev is rejected: the broker's
+cookie scoping, redirect rules, and unbypassable bounce all depend
+on real `.kids` hostnames. The dev environment must resolve them too.
+
+### Per-domain resolver on the developer's laptop
+
+systemd-resolved supports a routing-only rule: only `.kids` queries
+go to the box; everything else uses the laptop's normal resolver. No
+global DNS hijack, no `/etc/hosts` maintenance.
+
+```ini
+# /etc/systemd/resolved.conf.d/treehouse.conf
+[Resolve]
+DNS=10.10.10.1
+Domains=~kids
+```
+
+After `systemctl restart systemd-resolved`: `home.kids` resolves via
+the box, `github.com` continues to resolve via the laptop's upstream.
+
+This requires an L2 path from the laptop to 10.10.10.1, which
+libvirt's `private_network` provides automatically via the `virbr*`
+interface created on the host.
+
+### Test-client VM as the validation surface
+
+The laptop is the wrong place to test "the kids segment cannot reach
+the internet" — the laptop has its own internet, and even with the
+per-domain resolver its routing table still has a default route. A
+small companion VM lives in the Vagrantfile, attached only to the
+kids' bridge:
+
+```ruby
+config.vm.define "client" do |c|
+  c.vm.box = "generic/alpine318"
+  c.vm.network "private_network",
+    libvirt__network_name: "br-kids",
+    libvirt__forward_mode: "none",
+    auto_config: false
+  c.vm.provider "libvirt" do |v|
+    v.memory = 256
+    v.cpus = 1
+  end
+end
+```
+
+Its DHCP comes from the box's dnsmasq. Its routing table has no
+default route. It's the closest dev-time approximation of a tablet.
+`make verify-isolation` runs probes from inside this VM — direct-IP
+`curl` to public addresses, DNS lookups for non-`.kids` names,
+default-route check. It is the gate, not a script run on the
+developer's laptop.
+
+### Quick shell checks
+
+For one-off curl from outside any VM:
+
+```bash
+curl --resolve home.kids:80:10.10.10.1 http://home.kids/
+```
+
+Useful in CI runners and ad-hoc debugging where systemd-resolved
+isn't configured. Not a development pattern — use the resolver rule
+for actual browsing.
+
 ## Ansible roles
 
 Every role is opinionated and idempotent. Re-running `ansible-playbook

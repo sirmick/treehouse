@@ -15,8 +15,10 @@ plumbing in place, ready for content services to drop into.
 
 **Deliverables:**
 
-- `Vagrantfile` (libvirt or VirtualBox) provisioning a Debian 12 VM with
-  two virtual disks (~40 GB system, ~1 TB content).
+- `Vagrantfile` (libvirt or VirtualBox) provisioning two VMs:
+  - The treehouse box: Debian 12, two virtual disks (~40 GB system, ~1 TB content).
+  - A test-client VM: small Alpine, attached only to the kids' bridge.
+    Stand-in for a tablet, and the host from which isolation probes run.
 - `ansible/site.yml` with `base` and `network` roles:
   - apt baseline, ufw/nftables, ssh hardening
   - dnsmasq installed, configured to wildcard `.kids` to host IP
@@ -24,15 +26,28 @@ plumbing in place, ready for content services to drop into.
   - Docker engine installed
   - Storage layout `/srv/treehouse/{config,state,content,launcher,logs}`
     created with correct ownership.
+- Schema files for `manifest.yml` and `kids.yml` checked in (Pydantic
+  or JSON Schema). No orchestrator reads them yet; they're locked early
+  to keep the file format stable before anything binds to it.
+- `backup` Ansible role: restic installed, repository initialized,
+  systemd timer scheduled. One manual snapshot taken to prove the path.
+- `bin/verify-isolation` (driven by `make verify-isolation`) running
+  probes from the test-client VM: no default route, no DNS resolution
+  for non-`.kids` names, no TCP reachability to public IPs.
 - `make up` brings the box from zero to bootable; `make destroy` cleans up.
 
 **Exit criteria:**
 
-- `vagrant up` completes without error.
-- A device on the kids' bridge gets a DHCP lease.
-- `curl http://hello.kids` from that device hits Caddy's placeholder page.
-- `ip route` on the VM has no default route to the public internet
+- `vagrant up` completes without error for both VMs.
+- The test-client VM gets a DHCP lease from the box's dnsmasq.
+- `curl http://hello.kids` from the test-client VM hits Caddy's placeholder.
+- `ip route` on the box has no default route to the public internet
   (or the route exists only on a separate management interface).
+- `make verify-isolation` exits 0.
+- `restic restore` to a fresh third VM completes and brings up a working
+  copy of the box. Proves backup works *before* there's anything
+  precious to back up.
+- Re-running `ansible-playbook site.yml` against a healthy box is a no-op.
 
 ## Phase 1 — Single-service MVP (Kiwix)
 
@@ -51,9 +66,12 @@ offline.
 
 **Exit criteria:**
 
-- Both `home.kids` and `wikipedia.kids` reachable from a tablet.
-- Internet truly unreachable: confirm via direct-IP probes (e.g.
-  `curl 1.1.1.1` from the tablet hangs and times out).
+- Both `home.kids` and `wikipedia.kids` reachable from the test-client
+  VM, and from the developer's laptop with the per-domain `.kids`
+  resolver rule (see `deployment.md` § Development DNS).
+- Internet truly unreachable: `curl 1.1.1.1` from the test-client VM
+  hangs and times out; `nslookup youtube.com` from inside the VM
+  resolves to 10.10.10.1 (sinkhole), not a public IP.
 - Restart the VM; everything still works without manual intervention.
 
 This is the demo-to-yourself moment that proves the topology.
