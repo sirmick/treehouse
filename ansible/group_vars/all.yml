@@ -5,12 +5,19 @@
 # below are kept as aliases so the existing roles (which read
 # `kids_subnet`, `kids_host_ip`, etc. directly) keep working until they
 # migrate to the structured paths.
-kids_subnet:        "{{ network.isolated.subnet }}"
-kids_host_ip:       "{{ network.isolated.host_ip }}"
-kids_dhcp_start:    "{{ network.isolated.dhcp_start }}"
-kids_dhcp_end:      "{{ network.isolated.dhcp_end }}"
-kids_domain:        "{{ network.isolated.domain }}"
-kids_bridge:        "{{ network.isolated.bridge }}"
+# kids_host_ip flips by mode — host nginx + adjacent services bind to it.
+kids_host_ip: >-
+  {{ network.lan.ip.split('/')[0]
+     if network.mode == 'lan'
+     else network.isolated.host_ip }}
+
+# These stay derived from the isolated config since they have no analog
+# in lan mode (the LAN's own resolver/DHCP take over).
+kids_subnet:     "{{ network.isolated.subnet }}"
+kids_dhcp_start: "{{ network.isolated.dhcp_start }}"
+kids_dhcp_end:   "{{ network.isolated.dhcp_end }}"
+kids_domain:     "{{ network.isolated.domain }}"
+kids_bridge:     "{{ network.isolated.bridge }}"
 # kids_iface and mgmt_iface are detected dynamically by the network role
 # (set_fact). Don't pin them here — names depend on kernel naming policy.
 

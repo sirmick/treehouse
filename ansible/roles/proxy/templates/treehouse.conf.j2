@@ -1,7 +1,14 @@
 # nginx site config for the kids' segment.
-# Bound to {{ kids_host_ip }}:80 only. dnsmasq sinkholes every
-# unknown hostname to this IP, so the default_server block catches
-# unrecognised hosts with the friendly "not at home" page.
+# Bound to {{ kids_host_ip }}:80 only.
+#
+# In isolated mode dnsmasq sinkholes every unknown hostname to this IP
+# so the default_server catches youtube.com / tiktok.com / etc. In lan
+# mode unknown Hosts mostly come from misconfigured proxies or probes,
+# but the default_server handles them the same way.
+#
+# Each named vhost takes both its internal name (home.kids, etc.) AND
+# the configured public alias from treehouse.yml's hostnames: table —
+# so requests like Host: home-kids.example.com hit the same backend.
 
 # Default server — sinkhole for any unrecognised Host header.
 server {
@@ -17,7 +24,8 @@ server {
 # home.kids — placeholder landing page.
 server {
     listen {{ kids_host_ip }}:80;
-    server_name home.kids hello.kids;
+    server_name home.kids hello.kids
+                {{ hostnames.home.public }} {{ hostnames.hello.public }};
     root {{ treehouse_root }}/launcher;
     index index.html;
 
@@ -33,7 +41,7 @@ server {
 # collision where 8080 is taken on the laptop dev path).
 server {
     listen {{ kids_host_ip }}:80;
-    server_name wikipedia.kids;
+    server_name wikipedia.kids {{ hostnames.wikipedia.public }};
 
     location / {
         proxy_pass http://127.0.0.1:18080;

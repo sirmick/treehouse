@@ -23,7 +23,9 @@
     group: "{{ treehouse_group }}"
     mode: "0644"
     directory_mode: "0755"
-  notify: docker compose up
+  notify:
+    - docker compose up
+    - restart compose proxy
 
 - name: Library.xml stub if missing (so kiwix-serve starts even with no ZIMs)
   ansible.builtin.copy:

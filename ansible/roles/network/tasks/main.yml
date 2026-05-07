@@ -25,12 +25,13 @@
 
 - name: Required packages
   ansible.builtin.apt:
-    name:
-      - dnsmasq
-      - nftables
+    name: "{{ ['nftables'] + (['dnsmasq'] if network.mode == 'isolated' else []) }}"
     state: present
 
 # ----- Static IP on the kids interface --------------------------------------
+# Two flavours: isolated mode is /24 with no gateway/DNS (the VM IS the
+# DHCP/DNS authority); lan mode takes the configured static IP, gateway,
+# and DNS servers from treehouse.yml.
 - name: Persist kids interface config (systemd-networkd)
   ansible.builtin.copy:
     dest: /etc/systemd/network/10-kids.network
@@ -42,18 +43,29 @@
       Name={{ kids_iface }}
 
       [Network]
-      Address={{ kids_host_ip }}/24
+      {% if network.mode == 'isolated' %}
+      Address={{ network.isolated.host_ip }}/24
       ConfigureWithoutCarrier=true
+      {% else %}
+      Address={{ network.lan.ip }}
+      Gateway={{ network.lan.gateway }}
+      {% for dns in network.lan.dns %}
+      DNS={{ dns }}
+      {% endfor %}
+      {% endif %}
       LinkLocalAddressing=no
       IPv6AcceptRA=no
   notify: reload networkd
 
 # Flush now so the kids interface gets its IP before dnsmasq tries to
-# bind to listen-address=10.10.10.1 below.
+# bind to listen-address below (isolated mode), or before nftables
+# rules reference it.
 - name: Apply network changes immediately
   ansible.builtin.meta: flush_handlers
 
-# ----- dnsmasq --------------------------------------------------------------
+# ----- dnsmasq (isolated mode only) ----------------------------------------
+# In lan mode the LAN's existing resolver handles DNS and the LAN's
+# DHCP server hands out leases. We don't run dnsmasq.
 - name: Disable dnsmasq listening on the default resolver port for systemd-resolved hosts
   ansible.builtin.lineinfile:
     path: /etc/default/dnsmasq
@@ -61,6 +73,7 @@
     line: 'DNSMASQ_OPTS="--conf-dir=/etc/dnsmasq.d,*.conf"'
     create: true
     mode: "0644"
+  when: network.mode == 'isolated'
 
 - name: dnsmasq kids segment config
   ansible.builtin.copy:
@@ -70,35 +83,36 @@
     mode: "0644"
     content: |
       # Treehouse kids segment — dnsmasq config.
-      # Authoritative DHCP + DNS for {{ kids_subnet }}. No upstream resolver.
+      # Authoritative DHCP + DNS for {{ network.isolated.subnet }}. No upstream resolver.
 
       interface={{ kids_iface }}
       bind-interfaces
       except-interface=lo
-      listen-address={{ kids_host_ip }}
+      listen-address={{ network.isolated.host_ip }}
 
       # DHCP scope. NO gateway. NO upstream DNS.
-      dhcp-range={{ kids_dhcp_start }},{{ kids_dhcp_end }},12h
+      dhcp-range={{ network.isolated.dhcp_start }},{{ network.isolated.dhcp_end }},12h
       # Send option 3 (router) empty — kids segment is isolated, no gateway.
       # `option:router,` (named) requires a value; raw `3` allows empty.
       dhcp-option=3
-      dhcp-option=option:dns-server,{{ kids_host_ip }}
-      dhcp-option=option:domain-name,{{ kids_domain }}
-      dhcp-option=option:ntp-server,{{ kids_host_ip }}
+      dhcp-option=option:dns-server,{{ network.isolated.host_ip }}
+      dhcp-option=option:domain-name,{{ network.isolated.domain }}
+      dhcp-option=option:ntp-server,{{ network.isolated.host_ip }}
 
-      # DNS — every .{{ kids_domain }} name → host. Caddy distinguishes by Host header.
-      domain={{ kids_domain }}
-      local=/{{ kids_domain }}/
+      # DNS — every .{{ network.isolated.domain }} name → host. nginx distinguishes by Host header.
+      domain={{ network.isolated.domain }}
+      local=/{{ network.isolated.domain }}/
       expand-hosts
-      address=/.{{ kids_domain }}/{{ kids_host_ip }}
+      address=/.{{ network.isolated.domain }}/{{ network.isolated.host_ip }}
 
       # Sinkhole — every other DNS query → host. No upstream.
-      address=/#/{{ kids_host_ip }}
+      address=/#/{{ network.isolated.host_ip }}
 
       no-resolv
       no-poll
       no-hosts
   notify: restart dnsmasq
+  when: network.mode == 'isolated'
 
 # ----- nftables -------------------------------------------------------------
 - name: nftables kids ruleset
@@ -163,3 +177,14 @@
     name: dnsmasq
     enabled: true
     state: started
+  when: network.mode == 'isolated'
+
+# In lan mode dnsmasq might still be installed from a previous isolated
+# run; make sure it's stopped + disabled so it can't bind.
+- name: Stop + disable dnsmasq when not in isolated mode
+  ansible.builtin.systemd:
+    name: dnsmasq
+    enabled: false
+    state: stopped
+  when: network.mode != 'isolated'
+  failed_when: false
