@@ -122,15 +122,22 @@ def proxy_base(_stack_up: dict[str, str]) -> str:
 
 @pytest.fixture(scope="session")
 def live_base() -> str:
-    """Base IP for live-stack tests against the deployed VM.
+    """Netloc for live-stack tests against the deployed VM.
 
-    Default 10.10.10.1. Override with TREEHOUSE_HOST=<ip>. Skip if
-    unreachable (i.e. the VM isn't up).
+    Default 10.10.10.1. Override with TREEHOUSE_HOST=<host[:port]> —
+    `make test-live` sets 127.0.0.1:18080 (an SSH local-forward into
+    the VM, since the host has no route to br-kids). Skip if
+    unreachable.
     """
-    host = os.environ.get("TREEHOUSE_HOST", "10.10.10.1")
+    netloc = os.environ.get("TREEHOUSE_HOST", "10.10.10.1")
+    if ":" in netloc:
+        host, port_str = netloc.rsplit(":", 1)
+        port = int(port_str)
+    else:
+        host, port = netloc, 80
     try:
-        with socket.create_connection((host, 80), timeout=2):
+        with socket.create_connection((host, port), timeout=2):
             pass
     except OSError:
-        pytest.skip(f"no route to {host}:80 — bring up the VM first")
-    return host
+        pytest.skip(f"no route to {netloc} — bring up the VM first")
+    return netloc

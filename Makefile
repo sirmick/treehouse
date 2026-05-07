@@ -110,8 +110,8 @@ test-schemas:              ## Round-trip manifest/kids schemas
 test-compose:              ## Compose stack: kiwix, proxy host-routing, sinkhole
 	.venv/bin/python -m pytest tests/test_compose.py tests/test_compose_proxy.py tests/test_adapters.py tests/test_provisioner.py -v
 
-test-live:                 ## Hit the deployed VM at 10.10.10.1 (after `make up`)
-	TREEHOUSE_HOST=10.10.10.1 .venv/bin/python -m pytest tests/test_live.py -v
+test-live:                 ## Hit the deployed VM via SSH local-forward to 10.10.10.1:80
+	bin/test-live.sh
 
 test-all:                  ## All suites (schemas + compose + live)
 	$(MAKE) test-schemas
