@@ -1,5 +1,13 @@
 ---
+# `restart`, not `reloaded`: HUP makes nginx re-read config and rebuild
+# workers but does NOT recreate listening sockets. So a fresh-VM
+# install (where apt's first start binds 0.0.0.0:80 from the default
+# site, then the role removes default and writes treehouse.conf with
+# `listen 10.10.10.1:80`) leaves the old wildcard socket in place
+# under reload — and serves the welcome page on every IP. Restart is
+# the only way to rebind. The cost is a sub-second blip; on this box
+# that's free.
 - name: reload nginx
   ansible.builtin.systemd:
     name: nginx
-    state: reloaded
+    state: restarted
