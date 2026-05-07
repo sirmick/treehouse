@@ -1,0 +1,41 @@
+---
+# Network --------------------------------------------------------------------
+kids_subnet:        "10.10.10.0/24"
+kids_host_ip:       "10.10.10.1"
+kids_dhcp_start:    "10.10.10.50"
+kids_dhcp_end:      "10.10.10.250"
+kids_iface:         "eth1"          # second NIC on the treehouse VM
+kids_bridge:        "br-kids"
+
+# Hostnames served on the kids segment ---------------------------------------
+kids_domain: "kids"
+kids_vhosts:
+  - home.kids
+  - hello.kids        # placeholder during phase 0
+  - wikipedia.kids
+  - admin.kids
+
+# Storage --------------------------------------------------------------------
+treehouse_root:     "/srv/treehouse"
+treehouse_user:     "treehouse"
+treehouse_group:    "treehouse"
+
+treehouse_paths:
+  - "{{ treehouse_root }}/config"
+  - "{{ treehouse_root }}/state"
+  - "{{ treehouse_root }}/content"
+  - "{{ treehouse_root }}/content/zims"
+  - "{{ treehouse_root }}/launcher"
+  - "{{ treehouse_root }}/logs"
+
+# Backup ---------------------------------------------------------------------
+# For milestone 1, restic targets a host-mounted dir. External drive is a
+# Phase 9 (Pi migration) concern.
+restic_repo:        "/srv/treehouse/restic-repo"
+restic_password:    "milestone1-placeholder-rotate-me"
+restic_keep_daily:  7
+restic_keep_weekly: 4
+restic_keep_monthly: 12
+
+# Container images (pinned per deployment.md convention) --------------------
+kiwix_image:        "ghcr.io/kiwix/kiwix-serve:3.7.0"

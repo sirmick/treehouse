@@ -1,0 +1,4 @@
+---
+- name: docker compose up
+  ansible.builtin.command:
+    cmd: docker compose -f {{ treehouse_root }}/config/compose.yml up -d

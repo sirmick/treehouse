@@ -1,0 +1,13 @@
+<!--
+  Libvirt network for the kids' segment.
+
+  - bridge name br-kids: appears on the host as a real bridge interface;
+    other VMs attach to it.
+  - no <forward> element: isolated, no NAT, no upstream from this network.
+  - no <ip> element: libvirt does not run its own dnsmasq here. The
+    treehouse VM runs dnsmasq inside, so it owns DHCP+DNS for 10.10.10.0/24.
+-->
+<network>
+  <name>br-kids</name>
+  <bridge name='br-kids' stp='on' delay='0'/>
+</network>

@@ -98,7 +98,7 @@ Design docs live in [`docs/`](docs/):
 
 - [architecture.md](docs/architecture.md) — system overview, decisions, rationale
 - [roadmap.md](docs/roadmap.md) — phased build plan
-- [deployment.md](docs/deployment.md) — VM/Vagrant/Ansible/Docker, storage, sizing
+- [deployment.md](docs/deployment.md) — libvirt VM, Ansible roles, Docker, storage, sizing
 - [network.md](docs/network.md) — AP, DHCP, DNS, isolation
 - [content.md](docs/content.md) — manifest, updater, per-source idempotency
 - [identity.md](docs/identity.md) — kids.yml, broker, adapter contract
@@ -106,6 +106,8 @@ Design docs live in [`docs/`](docs/):
 - [search.md](docs/search.md) — aggregator, schema, ranking
 - [ai.md](docs/ai.md) — local AI, RAG, prompts, guardrails
 - [operations.md](docs/operations.md) — backup, observability, maintenance
+- [MILESTONE-1.md](docs/MILESTONE-1.md) — operator runbook for the first runnable slice
+- [commands.md](docs/commands.md) — every `make` target, what it does, when to run it
 
 ## License
 

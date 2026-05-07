@@ -1,0 +1,73 @@
+---
+- name: apt cache up to date
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Baseline packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - rsync
+      - chrony
+      - python3
+      - python3-pip
+      - python3-yaml
+      - jq
+      - dnsutils
+    state: present
+
+- name: Treehouse system group
+  ansible.builtin.group:
+    name: "{{ treehouse_group }}"
+    system: true
+    state: present
+
+- name: Treehouse system user
+  ansible.builtin.user:
+    name: "{{ treehouse_user }}"
+    group: "{{ treehouse_group }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ treehouse_root }}"
+    create_home: false
+    state: present
+
+- name: Storage directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ treehouse_user }}"
+    group: "{{ treehouse_group }}"
+    mode: "0755"
+  loop: "{{ treehouse_paths }}"
+
+- name: chrony — local stratum-10 (no upstream NTP)
+  ansible.builtin.copy:
+    dest: /etc/chrony/conf.d/treehouse.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Treehouse: no upstream NTP. Host advertises itself as a stratum-10
+      # source for the kids segment. RTC slewed slowly.
+      local stratum 10
+      allow {{ kids_subnet }}
+      makestep 1.0 3
+      rtcsync
+  notify: restart chrony
+
+- name: SSH hardening — no root login, key-only
+  ansible.builtin.copy:
+    dest: /etc/ssh/sshd_config.d/treehouse.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      ChallengeResponseAuthentication no
+      KbdInteractiveAuthentication no
+  notify: restart sshd

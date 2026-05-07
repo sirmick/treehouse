@@ -1,0 +1,16 @@
+---
+- name: reload networkd
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    state: restarted
+
+- name: restart dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: restarted
+    enabled: true
+
+- name: reload nftables
+  ansible.builtin.systemd:
+    name: nftables
+    state: reloaded

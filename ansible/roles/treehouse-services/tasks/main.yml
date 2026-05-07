@@ -1,0 +1,39 @@
+---
+# Render compose.yml, bring up the kiwix container, wait for health.
+
+- name: compose.yml in /srv/treehouse/config
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../compose.yml"
+    dest: "{{ treehouse_root }}/config/compose.yml"
+    owner: "{{ treehouse_user }}"
+    group: "{{ treehouse_group }}"
+    mode: "0644"
+  notify: docker compose up
+
+- name: Library.xml stub if missing (so kiwix-serve starts even with no ZIMs)
+  ansible.builtin.copy:
+    dest: "{{ treehouse_root }}/content/zims/library.xml"
+    owner: "{{ treehouse_user }}"
+    group: "{{ treehouse_group }}"
+    mode: "0644"
+    force: false
+    content: |
+      <?xml version="1.0" encoding="UTF-8" ?>
+      <library version="20110515">
+      </library>
+
+- name: Bring up the stack now (idempotent)
+  ansible.builtin.command:
+    cmd: docker compose -f {{ treehouse_root }}/config/compose.yml up -d
+  register: compose_up
+  changed_when: "'Started' in compose_up.stdout or 'Created' in compose_up.stdout"
+
+- name: Wait for kiwix to answer
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:8080/"
+    status_code: [200, 301, 302, 404]
+    timeout: 5
+  register: kiwix_health
+  retries: 12
+  delay: 5
+  until: kiwix_health.status is defined

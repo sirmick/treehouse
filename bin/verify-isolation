@@ -1,0 +1,82 @@
+#!/usr/bin/env sh
+# Run from inside the test-client VM. Probes every property the kids'
+# segment must satisfy:
+#
+#   - DHCP came from the box (default route is empty / no upstream).
+#   - DNS for .kids names resolves to 10.10.10.1.
+#   - DNS for non-.kids names resolves to 10.10.10.1 too (sinkhole).
+#   - Direct-IP TCP to public addresses fails (no route, no NAT).
+#
+# Prints a per-probe report. Exits 0 if every probe behaves as expected,
+# 1 otherwise. Designed to run on Alpine (busybox) — no bash-isms, no
+# distro-specific tooling. Just sh + busybox/coreutils.
+
+set -u
+
+PASS=0
+FAIL=0
+
+ok()   { printf '  \033[32mok\033[0m   %s\n' "$1"; PASS=$((PASS + 1)); }
+fail() { printf '  \033[31mfail\033[0m %s\n' "$1"; FAIL=$((FAIL + 1)); }
+
+# --- routing ---------------------------------------------------------------
+printf '\n[routing]\n'
+if ip route show default 2>/dev/null | grep -q .; then
+    fail "default route present (expected none): $(ip route show default)"
+else
+    ok  "no default route"
+fi
+
+# --- DNS resolution --------------------------------------------------------
+printf '\n[dns]\n'
+EXPECT_IP="10.10.10.1"
+
+# .kids names → host
+RESOLVED=$(nslookup home.kids 2>/dev/null | awk '/^Address: / {print $2}' | head -1)
+if [ "$RESOLVED" = "$EXPECT_IP" ]; then
+    ok  "home.kids → $EXPECT_IP"
+else
+    fail "home.kids resolved to '$RESOLVED', expected $EXPECT_IP"
+fi
+
+# Non-.kids names → host (sinkhole)
+RESOLVED=$(nslookup youtube.com 2>/dev/null | awk '/^Address: / {print $2}' | head -1)
+if [ "$RESOLVED" = "$EXPECT_IP" ]; then
+    ok  "youtube.com sinkholed to $EXPECT_IP"
+else
+    fail "youtube.com resolved to '$RESOLVED' (expected sinkhole to $EXPECT_IP)"
+fi
+
+# --- direct-IP probes ------------------------------------------------------
+printf '\n[direct-ip]\n'
+# 1.1.1.1 must NOT be reachable on any port.
+for PORT in 53 80 443; do
+    if timeout 3 nc -zv 1.1.1.1 "$PORT" 2>/dev/null; then
+        fail "1.1.1.1:$PORT was reachable (expected unreachable)"
+    else
+        ok  "1.1.1.1:$PORT unreachable"
+    fi
+done
+
+# --- HTTP to box -----------------------------------------------------------
+printf '\n[http]\n'
+HTTP_CODE=$(wget -q -O /dev/null --server-response "http://home.kids/" 2>&1 \
+    | awk '/HTTP\// {print $2}' | tail -1)
+if [ "$HTTP_CODE" = "200" ]; then
+    ok  "http://home.kids/ returned 200"
+else
+    fail "http://home.kids/ returned '$HTTP_CODE' (expected 200)"
+fi
+
+HTTP_CODE=$(wget -q -O /dev/null --server-response "http://wikipedia.kids/" 2>&1 \
+    | awk '/HTTP\// {print $2}' | tail -1)
+case "$HTTP_CODE" in
+    200|301|302) ok  "http://wikipedia.kids/ returned $HTTP_CODE" ;;
+    *)           fail "http://wikipedia.kids/ returned '$HTTP_CODE'" ;;
+esac
+
+# --- summary ---------------------------------------------------------------
+printf '\n----- summary -----\n'
+printf 'pass=%d fail=%d\n' "$PASS" "$FAIL"
+
+[ "$FAIL" -eq 0 ]

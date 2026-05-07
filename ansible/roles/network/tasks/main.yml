@@ -1,0 +1,134 @@
+---
+# Brings up the kids' segment: static IP on br-kids interface,
+# dnsmasq as DHCP+DNS authority, nftables as the drop-all-forward
+# defense layer. See docs/network.md.
+
+- name: Required packages
+  ansible.builtin.apt:
+    name:
+      - dnsmasq
+      - nftables
+    state: present
+
+# ----- Static IP on the kids interface --------------------------------------
+# Vagrant configures eth1 with the IP from Vagrantfile, but we re-assert it
+# here so a vanilla `apt-get install` doesn't undo anything.
+- name: Persist kids interface config (systemd-networkd)
+  ansible.builtin.copy:
+    dest: /etc/systemd/network/10-kids.network
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Match]
+      Name={{ kids_iface }}
+
+      [Network]
+      Address={{ kids_host_ip }}/24
+      ConfigureWithoutCarrier=true
+      LinkLocalAddressing=no
+      IPv6AcceptRA=no
+  notify: reload networkd
+
+# ----- dnsmasq --------------------------------------------------------------
+- name: Disable dnsmasq listening on the default resolver port for systemd-resolved hosts
+  ansible.builtin.lineinfile:
+    path: /etc/default/dnsmasq
+    regexp: '^DNSMASQ_OPTS='
+    line: 'DNSMASQ_OPTS="--conf-dir=/etc/dnsmasq.d,*.conf"'
+    create: true
+    mode: "0644"
+
+- name: dnsmasq kids segment config
+  ansible.builtin.copy:
+    dest: /etc/dnsmasq.d/kids.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Treehouse kids segment — dnsmasq config.
+      # Authoritative DHCP + DNS for {{ kids_subnet }}. No upstream resolver.
+
+      interface={{ kids_iface }}
+      bind-interfaces
+      except-interface=lo
+      listen-address={{ kids_host_ip }}
+
+      # DHCP scope. NO gateway. NO upstream DNS.
+      dhcp-range={{ kids_dhcp_start }},{{ kids_dhcp_end }},12h
+      dhcp-option=option:router,
+      dhcp-option=option:dns-server,{{ kids_host_ip }}
+      dhcp-option=option:domain-name,{{ kids_domain }}
+      dhcp-option=option:ntp-server,{{ kids_host_ip }}
+
+      # DNS — every .{{ kids_domain }} name → host. Caddy distinguishes by Host header.
+      domain={{ kids_domain }}
+      local=/{{ kids_domain }}/
+      expand-hosts
+      address=/.{{ kids_domain }}/{{ kids_host_ip }}
+
+      # Sinkhole — every other DNS query → host. No upstream.
+      address=/#/{{ kids_host_ip }}
+
+      no-resolv
+      no-poll
+      no-hosts
+  notify: restart dnsmasq
+
+# ----- nftables -------------------------------------------------------------
+- name: nftables kids ruleset
+  ansible.builtin.copy:
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      #!/usr/sbin/nft -f
+      flush ruleset
+
+      table inet kids {
+          chain forward {
+              type filter hook forward priority 0; policy drop;
+
+              # Allow kids segment to talk to itself (host services bound
+              # to the kids interface).
+              iifname "{{ kids_iface }}" oifname "{{ kids_iface }}" accept
+
+              # Belt: drop kids → anywhere else explicitly.
+              iifname "{{ kids_iface }}" drop
+          }
+
+          chain input {
+              type filter hook input priority 0; policy drop;
+
+              ct state established,related accept
+              iifname "lo" accept
+
+              # Kids segment may reach host services on these ports.
+              iifname "{{ kids_iface }}" tcp dport { 53, 80, 443 } accept
+              iifname "{{ kids_iface }}" udp dport { 53, 67, 68, 123 } accept
+              # ICMP for ping diagnostics.
+              iifname "{{ kids_iface }}" ip protocol icmp accept
+
+              # Vagrant management interface (eth0): SSH only.
+              iifname "eth0" tcp dport 22 accept
+              iifname "eth0" ct state new tcp dport 22 accept
+          }
+
+          chain output {
+              type filter hook output priority 0; policy accept;
+          }
+      }
+  notify: reload nftables
+
+- name: Enable nftables
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started
+
+- name: Enable + start dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    enabled: true
+    state: started

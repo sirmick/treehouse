@@ -1,0 +1,31 @@
+# Vagrant
+.vagrant/
+*.box
+
+# Ansible
+*.retry
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local secrets and state — never commit
+config/secrets.yml
+state/
+logs/
+content/
+launcher/build/
+
+# Restic password files
+*.restic-password
+
+# OS
+.DS_Store

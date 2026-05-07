@@ -1,0 +1,102 @@
+---
+# restic backup of state/ + config/. Daily systemd timer.
+# For milestone 1 the repo lives on the host filesystem so that the
+# restore drill can prove the path. External-drive deployment is a
+# Phase 9 (Pi migration) concern.
+
+- name: Install restic
+  ansible.builtin.apt:
+    name: restic
+    state: present
+
+- name: restic password file
+  ansible.builtin.copy:
+    dest: /etc/treehouse/restic.password
+    owner: root
+    group: root
+    mode: "0600"
+    content: "{{ restic_password }}\n"
+
+- name: Ensure restic repo dir exists
+  ansible.builtin.file:
+    path: "{{ restic_repo }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Initialise restic repo (idempotent)
+  ansible.builtin.command:
+    cmd: "restic init --repo {{ restic_repo }} --password-file /etc/treehouse/restic.password"
+  args:
+    creates: "{{ restic_repo }}/config"
+
+- name: Backup script
+  ansible.builtin.copy:
+    dest: /usr/local/bin/treehouse-backup
+    owner: root
+    group: root
+    mode: "0750"
+    content: |
+      #!/usr/bin/env bash
+      # Daily restic snapshot of state/ + config/. Content/ is excluded
+      # (replaceable from manifest); logs/ excluded (not worth restoring).
+      set -euo pipefail
+
+      export RESTIC_REPOSITORY={{ restic_repo }}
+      export RESTIC_PASSWORD_FILE=/etc/treehouse/restic.password
+
+      restic backup \
+        --tag treehouse-daily \
+        {{ treehouse_root }}/state \
+        {{ treehouse_root }}/config
+
+      restic forget \
+        --tag treehouse-daily \
+        --keep-daily {{ restic_keep_daily }} \
+        --keep-weekly {{ restic_keep_weekly }} \
+        --keep-monthly {{ restic_keep_monthly }} \
+        --prune
+
+- name: Backup systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/treehouse-backup.service
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Treehouse daily restic backup
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/treehouse-backup
+      Nice=10
+      IOSchedulingClass=best-effort
+      IOSchedulingPriority=7
+
+- name: Backup systemd timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/treehouse-backup.timer
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Daily restic backup of /srv/treehouse/state and /config
+
+      [Timer]
+      OnCalendar=daily
+      RandomizedDelaySec=15m
+      Persistent=true
+
+      [Install]
+      WantedBy=timers.target
+
+- name: Enable backup timer
+  ansible.builtin.systemd:
+    name: treehouse-backup.timer
+    enabled: true
+    state: started
+    daemon_reload: true

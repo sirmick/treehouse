@@ -1,0 +1,35 @@
+---
+# Top-level playbook for milestone 1.
+#
+# Each role is idempotent. Re-running this playbook against a healthy box
+# is a no-op (the milestone exit criterion).
+#
+# Order matters:
+#   base       — apt baseline, users, /srv layout. Everything else assumes
+#                this ran first.
+#   network    — bring up br-kids, dnsmasq, nftables. Must run before
+#                proxy + docker so they bind to the right interface.
+#   proxy      — Caddy on the host. Needs network up.
+#   docker     — engine + compose plugin. Needed before treehouse-services.
+#   treehouse-services — render compose.yml, bring up kiwix container.
+#   backup     — restic + systemd timer. Last because it backs up state
+#                that the previous roles created.
+
+- name: Treehouse host provisioning
+  hosts: treehouse
+  become: true
+  gather_facts: true
+
+  roles:
+    - role: base
+      tags: [base]
+    - role: network
+      tags: [network]
+    - role: proxy
+      tags: [proxy]
+    - role: docker
+      tags: [docker]
+    - role: treehouse-services
+      tags: [services]
+    - role: backup
+      tags: [backup]

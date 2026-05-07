@@ -1,0 +1,73 @@
+# Example kids.yml — placeholder data.
+#
+# Real production kids.yml lives outside the repo (in /srv/treehouse/config/
+# on the box, optionally encrypted with sops). This example is the
+# fixture the test suite round-trips and the documented starting point.
+#
+# Ids are stable and used as the username in every backend. Names and
+# avatars can change; ids cannot.
+
+kids:
+  - id: alice
+    name: Alice
+    age: 8
+    age_band: "6-10"
+    avatar: avatars/alice.png
+    pin: "1234"
+    permissions:
+      messaging: true
+      messaging_contacts: [grandma]
+      ai_companion: true
+      services:
+        wikipedia:
+          enabled: true
+        khan:
+          enabled: true
+          curfew_after: "19:00"
+        videos:
+          enabled: true
+          curfew_after: "19:00"
+          daily_limit_minutes: 60
+
+  - id: bob
+    name: Bob
+    age: 5
+    age_band: "3-7"
+    avatar: avatars/bob.png
+    # No PIN — the kid's tablet is dedicated to him.
+    pin: null
+    permissions:
+      messaging: false
+      ai_companion: false
+      activities: [TurtleArt, Memorize, Maze, Physics]
+      services:
+        wikipedia:
+          enabled: true
+        khan:
+          enabled: true
+
+  - id: guest
+    name: Visitor
+    age: 0
+    age_band: "3-7"
+    avatar: avatars/guest.png
+    pin: null
+    ephemeral: true
+    permissions:
+      messaging: false
+      ai_companion: false
+      activities: [Memorize, Maze, Physics]
+
+contacts:
+  - id: grandma
+    name: Grandma
+    avatar: avatars/grandma.png
+    role: family
+  - id: mum
+    name: Mum
+    avatar: avatars/mum.png
+    role: parent
+  - id: dad
+    name: Dad
+    avatar: avatars/dad.png
+    role: parent
