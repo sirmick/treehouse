@@ -82,13 +82,15 @@ backup:                    ## Trigger a one-shot restic snapshot now
 	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
 	ssh mick@$$IP 'sudo systemctl start treehouse-backup.service'
 
-restore-drill:             ## Restore latest snapshot to a fresh /tmp dir on the VM
+restore-drill:             ## Take a fresh snapshot, then restore it to /tmp on the VM
 	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
 	ssh mick@$$IP '\
+	  sudo systemctl start treehouse-backup.service && \
+	  sudo rm -rf /tmp/restore-drill && \
 	  sudo restic --repo /srv/treehouse/restic-repo \
 	    --password-file /etc/treehouse/restic.password \
 	    restore latest --target /tmp/restore-drill && \
-	  ls /tmp/restore-drill/srv/treehouse/'
+	  sudo ls /tmp/restore-drill/srv/treehouse/'
 
 # ----- health -------------------------------------------------------------
 health:                    ## Smoke test against the VM
