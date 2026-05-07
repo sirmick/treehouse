@@ -66,9 +66,9 @@ ssh-treehouse:             ## SSH into the treehouse VM
 	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
 	  ssh mick@$$IP
 
-# ----- isolation gate (runs probes from a netns on the host bridge) --------
-verify-isolation:          ## Probe network isolation from a netns on host's br-kids
-	sudo bash bin/run-isolation-via-netns.sh bin/verify-isolation
+# ----- isolation gate (runs probes from a throwaway VM on br-kids) ---------
+verify-isolation:          ## Spin a throwaway tablet VM on br-kids and run the probe inside it
+	bin/verify-isolation-via-tablet.sh
 
 # ----- content -------------------------------------------------------------
 seed-wikipedia:            ## Manual ZIM placement: Wikipedia top-100 (milestone seed)

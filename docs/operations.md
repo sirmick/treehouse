@@ -138,7 +138,7 @@ substitute. Bump the date as new builds land at
 ### 6. Health checks
 
 ```bash
-make verify-isolation   # netns probes; confirms br-kids can't reach upstream
+make verify-isolation   # boots a throwaway tablet VM on br-kids, runs the probe via cloud-init
 make restore-drill      # restic restore of the latest snapshot
 make test-live          # pytest against TREEHOUSE_HOST=10.10.10.1
 ```
