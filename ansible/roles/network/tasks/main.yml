@@ -109,7 +109,13 @@
     mode: "0644"
     content: |
       #!/usr/sbin/nft -f
-      flush ruleset
+      # Scope our reset to our own table — `flush ruleset` would wipe
+      # docker's NAT chains too, breaking any container with a
+      # `ports:` mapping until docker is restarted. `add table` is
+      # idempotent (no-op if it exists); `flush table` then clears
+      # any prior contents before we redefine it.
+      add table inet kids
+      flush table inet kids
 
       table inet kids {
           chain forward {
