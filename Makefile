@@ -81,7 +81,16 @@ ssh-treehouse:             ## SSH into the treehouse VM
 	  ssh mick@$$IP
 
 # ----- isolation gate (runs probes from a throwaway VM on br-kids) ---------
+# verify-isolation only makes sense in isolated mode — the gate proves
+# that a device on br-kids can't reach the internet, but in lan mode
+# the VM IS on the LAN by design.
 verify-isolation:          ## Spin a throwaway tablet VM on br-kids and run the probe inside it
+	@mode=$$(bin/cfg network.mode); \
+	if [ "$$mode" != "isolated" ]; then \
+	  echo "verify-isolation requires network.mode: isolated (current: $$mode)" >&2; \
+	  echo "the gate proves br-kids can't reach upstream; lan mode is on the LAN by design." >&2; \
+	  exit 1; \
+	fi
 	bin/verify-isolation-via-tablet.sh
 
 # ----- content -------------------------------------------------------------
