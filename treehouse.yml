@@ -36,7 +36,7 @@ network:
 
   lan:
     host_iface: enp3s0          # host NIC to macvtap-bridge onto
-    ip:         172.16.16.50/24
+    ip:         172.16.16.61/24
     gateway:    172.16.16.1
     dns:        [172.16.16.1]
 
