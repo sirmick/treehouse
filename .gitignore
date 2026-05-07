@@ -13,6 +13,10 @@ __pycache__/
 .venv/
 .pytest_cache/
 
+# Node / SvelteKit
+node_modules/
+launcher/.svelte-kit/
+
 # Editor
 .idea/
 .vscode/
