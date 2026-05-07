@@ -1,0 +1,60 @@
+---
+# Treehouse deployment settings — single source of truth for the per-host
+# config that varies between deployments (laptop dev VM vs Pi vs another
+# laptop). Read by:
+#
+#   - bin/up.sh                       — picks libvirt args from `network:`
+#   - ansible (vars_files in site.yml) — group_vars/all.yml derives
+#                                        legacy flat names from this
+#   - launcher build (slice 5+)       — tile hrefs from `hostnames:`
+#
+# Defaults below match the original M1 isolated-mode design so a fresh
+# clone behaves exactly the way the docs describe. Override for your
+# deployment by editing this file (it's checked in, not gitignored — the
+# committed values are the canonical "demo / isolated dev VM" preset).
+
+network:
+  # mode = isolated: second NIC on libvirt's br-kids (no DHCP from LAN,
+  #                  dnsmasq inside the VM serves DHCP+DNS for the kids
+  #                  segment on `isolated.subnet`). `make verify-isolation`
+  #                  is meaningful in this mode.
+  # mode = lan:      second NIC macvtap-bridged onto the host's LAN NIC.
+  #                  The VM gets a static IP on the LAN; LAN devices
+  #                  (e.g. proxy.home.arpa) can reach it. dnsmasq is
+  #                  disabled — the LAN's existing resolver is used. Trade:
+  #                  no structural isolation, so `verify-isolation` no
+  #                  longer applies and is gated off in this mode.
+  mode: isolated
+
+  isolated:
+    subnet:     10.10.10.0/24
+    host_ip:    10.10.10.1
+    dhcp_start: 10.10.10.50
+    dhcp_end:   10.10.10.250
+    domain:     kids
+    bridge:     br-kids        # libvirt network name
+
+  lan:
+    host_iface: enp3s0          # host NIC to macvtap-bridge onto
+    ip:         172.16.16.50/24
+    gateway:    172.16.16.1
+    dns:        [172.16.16.1]
+
+# Public-name aliases for the kids vhosts. nginx adds the public name as
+# a server_name alongside the internal Host header (so `Host: home.kids`
+# and `Host: home-kids.example.com` both hit the same vhost). The
+# launcher build uses the public name for tile hrefs when running in
+# `network.mode == lan`.
+#
+# Keyed by a short id so other services (the launcher's tile config in
+# slice 5) can reference services by id rather than by hostname string.
+hostnames:
+  home:
+    internal: home.kids
+    public:   home-kids.example.com
+  hello:
+    internal: hello.kids
+    public:   hello-kids.example.com
+  wikipedia:
+    internal: wikipedia.kids
+    public:   wiki-kids.example.com

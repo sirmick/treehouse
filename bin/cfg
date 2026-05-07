@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Read a value from treehouse.yml by dotted path. Trivial helper for
+# shell consumers (bin/up.sh, Makefile guards, bin/test-live.sh) so we
+# don't sprinkle inline python yaml-loaders everywhere.
+#
+# Usage:
+#   cfg network.mode                  # → isolated
+#   cfg network.lan.host_iface        # → enp3s0
+#   cfg network.lan.dns               # → space-separated for lists
+#   cfg hostnames.wikipedia.public    # → wiki-kids.example.com
+#
+# Exits 1 on missing key. Requires python3 + pyyaml (already a transitive
+# dep of ansible, which is required for the rest of the toolchain).
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $(basename "$0") <dotted.path>" >&2
+  exit 2
+fi
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG="${TREEHOUSE_CONFIG:-$REPO_ROOT/treehouse.yml}"
+
+[[ -f "$CONFIG" ]] || { echo "config not found: $CONFIG" >&2; exit 1; }
+
+python3 - "$CONFIG" "$1" <<'PY'
+import sys, yaml
+config_path, dotted = sys.argv[1], sys.argv[2]
+with open(config_path) as f:
+    data = yaml.safe_load(f)
+for part in dotted.split('.'):
+    if isinstance(data, list):
+        try:
+            data = data[int(part)]
+        except (ValueError, IndexError):
+            sys.stderr.write(f"key not found: {dotted}\n")
+            sys.exit(1)
+    elif isinstance(data, dict) and part in data:
+        data = data[part]
+    else:
+        sys.stderr.write(f"key not found: {dotted}\n")
+        sys.exit(1)
+if isinstance(data, list):
+    print(' '.join(str(x) for x in data))
+elif isinstance(data, dict):
+    sys.stderr.write(f"key resolves to dict, not scalar: {dotted}\n")
+    sys.exit(1)
+else:
+    print(data)
+PY

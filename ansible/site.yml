@@ -20,6 +20,15 @@
   become: true
   gather_facts: true
 
+  # Single source of truth for per-deployment settings. The repo-root
+  # treehouse.yml owns network mode, IP/DHCP config, and the public-name
+  # aliases. group_vars/all.yml derives the legacy flat var names from
+  # it so existing roles continue to read kids_subnet, kids_host_ip, etc.
+  # without modification (until they get migrated to the structured
+  # `network.*` paths in later slices).
+  vars_files:
+    - ../treehouse.yml
+
   roles:
     - role: base
       tags: [base]

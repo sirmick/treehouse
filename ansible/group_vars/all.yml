@@ -1,20 +1,20 @@
 ---
 # Network --------------------------------------------------------------------
-kids_subnet:        "10.10.10.0/24"
-kids_host_ip:       "10.10.10.1"
-kids_dhcp_start:    "10.10.10.50"
-kids_dhcp_end:      "10.10.10.250"
+# The structured `network:` and `hostnames:` config lives in /treehouse.yml
+# at the repo root, loaded by site.yml via vars_files. The flat names
+# below are kept as aliases so the existing roles (which read
+# `kids_subnet`, `kids_host_ip`, etc. directly) keep working until they
+# migrate to the structured paths.
+kids_subnet:        "{{ network.isolated.subnet }}"
+kids_host_ip:       "{{ network.isolated.host_ip }}"
+kids_dhcp_start:    "{{ network.isolated.dhcp_start }}"
+kids_dhcp_end:      "{{ network.isolated.dhcp_end }}"
+kids_domain:        "{{ network.isolated.domain }}"
+kids_bridge:        "{{ network.isolated.bridge }}"
 # kids_iface and mgmt_iface are detected dynamically by the network role
 # (set_fact). Don't pin them here — names depend on kernel naming policy.
-kids_bridge:        "br-kids"
 
-# Hostnames served on the kids segment ---------------------------------------
-kids_domain: "kids"
-kids_vhosts:
-  - home.kids
-  - hello.kids        # placeholder during phase 0
-  - wikipedia.kids
-  - admin.kids
+kids_vhosts:        "{{ hostnames.values() | map(attribute='internal') | list + ['admin.kids'] }}"
 
 # Storage --------------------------------------------------------------------
 treehouse_root:     "/srv/treehouse"
