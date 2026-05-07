@@ -1,9 +1,13 @@
 """Round-trip tests for the schemas. Run with `python -m pytest schemas/`."""
 
+from pathlib import Path
+
 import pytest
 import yaml
 
 from schemas import KidsConfig, Manifest
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_minimal_manifest():
@@ -56,6 +60,16 @@ profiles:
 def test_manifest_rejects_unknown_field():
     with pytest.raises(Exception):
         Manifest.model_validate({"zims": [{"name": "x", "BOGUS": True}]})
+
+
+def test_repo_manifest_validates():
+    """The committed manifest.yml at the repo root must validate against
+    the schema — typos or removed fields here are caught at test time
+    rather than at the next seed/updater run."""
+    manifest_path = REPO_ROOT / "manifest.yml"
+    assert manifest_path.exists(), f"missing {manifest_path}"
+    raw = yaml.safe_load(manifest_path.read_text())
+    Manifest.model_validate(raw)
 
 
 def test_minimal_kids():

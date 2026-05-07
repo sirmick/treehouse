@@ -1,0 +1,20 @@
+---
+# Treehouse content manifest. Declares what data the box should hold.
+# Schema lives in schemas/manifest.py; round-trip-tested in schemas/.
+#
+# Phase-3 plan (see docs/content.md): an `updater` script reconciles
+# the disk to this file on a weekly timer — fetches new ZIMs from
+# library.kiwix.org's OPDS catalog, imports Kolibri channels, runs
+# yt-dlp into PeerTube, etc. Each per-source `name` is the catalog
+# name with no date suffix; the updater resolves the latest version.
+#
+# M1 reality (today): the updater isn't built yet. The only consumer
+# of this file is `make seed-wikipedia`, which reads the first zims[]
+# entry's name and pairs it with a hardcoded version date in the
+# Makefile to build the kiwix download URL. Adding more ZIMs here
+# without the updater means they don't get fetched yet — but the
+# names are validated against the schema, so when the updater lands
+# the file is already in the right shape.
+
+zims:
+  - name: wikipedia_en_100_maxi

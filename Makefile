@@ -25,11 +25,15 @@ INVENTORY   := $(ANSIBLE_DIR)/inventory/libvirt
 PLAYBOOK    := $(ANSIBLE_DIR)/site.yml
 COMPOSE     := docker compose
 COMPOSE_DEV := $(COMPOSE) -p treehouse
-# Kiwix's `wikipedia_en_for_schools.zim` is no longer published. The
-# closest substitute for a small, milestone-friendly seed is the
-# top-100 maxi (with images, ~50 MB). Bump the date as new builds land.
-WIKIPEDIA_SEED_NAME := wikipedia_en_100_maxi_2026-04.zim
-WIKIPEDIA_SEED_URL  := https://download.kiwix.org/zim/wikipedia/$(WIKIPEDIA_SEED_NAME)
+
+# Wikipedia seed: catalog name comes from manifest.yml (zims[0]); the
+# version date is hardcoded here as a stop-gap until the Phase-3
+# updater (docs/content.md) lands and resolves the latest from the
+# library.kiwix.org OPDS catalog. Bump the date as new builds land.
+ZIM_NAME            = $(shell bin/cfg -f manifest.yml zims.0.name)
+WIKIPEDIA_SEED_DATE := 2026-04
+WIKIPEDIA_SEED_FILE  = $(ZIM_NAME)_$(WIKIPEDIA_SEED_DATE).zim
+WIKIPEDIA_SEED_URL   = https://download.kiwix.org/zim/wikipedia/$(WIKIPEDIA_SEED_FILE)
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | awk -F: '{ printf "  %-22s %s\n", $$1, $$NF }'
@@ -94,10 +98,10 @@ verify-isolation:          ## Spin a throwaway tablet VM on br-kids and run the 
 	bin/verify-isolation-via-tablet.sh
 
 # ----- content -------------------------------------------------------------
-seed-wikipedia:            ## Manual ZIM placement: Wikipedia top-100 (milestone seed)
+seed-wikipedia:            ## Fetch the manifest.yml zims[0] file (versioned by WIKIPEDIA_SEED_DATE)
 	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
-	ssh mick@$$IP "sudo curl -L -o /srv/treehouse/content/zims/$(WIKIPEDIA_SEED_NAME) $(WIKIPEDIA_SEED_URL) && \
-	  sudo docker exec --user root treehouse-kiwix kiwix-manage /data/library.xml add /data/$(WIKIPEDIA_SEED_NAME) && \
+	ssh mick@$$IP "sudo curl -L -o /srv/treehouse/content/zims/$(WIKIPEDIA_SEED_FILE) $(WIKIPEDIA_SEED_URL) && \
+	  sudo docker exec --user root treehouse-kiwix kiwix-manage /data/library.xml add /data/$(WIKIPEDIA_SEED_FILE) && \
 	  sudo docker restart treehouse-kiwix"
 
 # ----- backup --------------------------------------------------------------
@@ -130,7 +134,7 @@ test:                      ## Schemas + compose + adapters + provisioner
 test-schemas:              ## Round-trip manifest/kids schemas
 	.venv/bin/python -m pytest schemas/ -v
 
-test-compose:              ## Compose stack: kiwix, proxy host-routing, sinkhole
+test-compose: launcher-build  ## Compose stack: kiwix, proxy host-routing, sinkhole
 	.venv/bin/python -m pytest tests/test_compose.py tests/test_compose_proxy.py tests/test_adapters.py tests/test_provisioner.py -v
 
 test-live:                 ## Hit the deployed VM via SSH local-forward to 10.10.10.1:80

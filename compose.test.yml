@@ -14,7 +14,9 @@ services:
       - "127.0.0.1:18181:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/sites:/srv/launcher:ro
+      # SvelteKit-built static assets, same as production compose.yml.
+      # `make test-compose` depends on launcher-build to populate this.
+      - ./launcher/build:/srv/launcher:ro
     depends_on:
       kiwix:
         condition: service_healthy
