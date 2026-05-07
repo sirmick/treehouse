@@ -1,4 +1,5 @@
 .PHONY: help \
+        bootstrap-host \
         dev-up dev-down dev-restart dev-logs \
         up down provision health ssh-treehouse \
         verify-isolation seed-wikipedia backup restore-drill \
@@ -23,7 +24,11 @@ INVENTORY   := $(ANSIBLE_DIR)/inventory/libvirt
 PLAYBOOK    := $(ANSIBLE_DIR)/site.yml
 COMPOSE     := docker compose
 COMPOSE_DEV := $(COMPOSE) -p treehouse
-WIKIPEDIA_FOR_SCHOOLS_URL := https://download.kiwix.org/zim/wikipedia/wikipedia_en_for_schools.zim
+# Kiwix's `wikipedia_en_for_schools.zim` is no longer published. The
+# closest substitute for a small, milestone-friendly seed is the
+# top-100 maxi (with images, ~50 MB). Bump the date as new builds land.
+WIKIPEDIA_SEED_NAME := wikipedia_en_100_maxi_2026-04.zim
+WIKIPEDIA_SEED_URL  := https://download.kiwix.org/zim/wikipedia/$(WIKIPEDIA_SEED_NAME)
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | awk -F: '{ printf "  %-22s %s\n", $$1, $$NF }'
@@ -61,18 +66,16 @@ ssh-treehouse:             ## SSH into the treehouse VM
 	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
 	  ssh mick@$$IP
 
-# ----- isolation gate (runs probes from inside a netns on the VM) ----------
-verify-isolation:          ## Probe network isolation from a netns on the VM
-	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
-	scp bin/verify-isolation mick@$$IP:/tmp/verify-isolation; \
-	ssh mick@$$IP 'sudo bash -s' < bin/run-isolation-via-netns.sh
+# ----- isolation gate (runs probes from a netns on the host bridge) --------
+verify-isolation:          ## Probe network isolation from a netns on host's br-kids
+	sudo bash bin/run-isolation-via-netns.sh bin/verify-isolation
 
 # ----- content -------------------------------------------------------------
-seed-wikipedia:            ## Manual ZIM placement: Wikipedia for Schools
+seed-wikipedia:            ## Manual ZIM placement: Wikipedia top-100 (milestone seed)
 	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
-	ssh mick@$$IP "sudo curl -L -o /srv/treehouse/content/zims/wikipedia_en_for_schools.zim $(WIKIPEDIA_FOR_SCHOOLS_URL) && \
-	  sudo docker exec treehouse-kiwix kiwix-manage /data/library.xml add /data/wikipedia_en_for_schools.zim && \
-	  sudo docker kill -s HUP treehouse-kiwix"
+	ssh mick@$$IP "sudo curl -L -o /srv/treehouse/content/zims/$(WIKIPEDIA_SEED_NAME) $(WIKIPEDIA_SEED_URL) && \
+	  sudo docker exec --user root treehouse-kiwix kiwix-manage /data/library.xml add /data/$(WIKIPEDIA_SEED_NAME) && \
+	  sudo docker restart treehouse-kiwix"
 
 # ----- backup --------------------------------------------------------------
 backup:                    ## Trigger a one-shot restic snapshot now
@@ -118,15 +121,37 @@ test-deps:                 ## Install python test deps into a local .venv
 	./.venv/bin/pip install -r tests/requirements.txt
 	@echo "activate: source .venv/bin/activate"
 
-# ----- toolchain reminder --------------------------------------------------
-toolchain:                 ## Print install command for missing host packages
-	@echo "On Ubuntu 24:"
+# ----- one-time host setup -------------------------------------------------
+bootstrap-host:            ## One-time host setup: apt deps, groups, libvirt storage dir
+	@echo "==> Installing host packages (sudo prompt)"
+	sudo apt install -y \
+	  libvirt-daemon-system libvirt-clients qemu-system-x86 qemu-utils \
+	  virtinst genisoimage \
+	  ansible \
+	  docker.io docker-compose-v2
+	@echo
+	@echo "==> Adding $$USER to libvirt, kvm, docker groups"
+	sudo usermod -aG libvirt,kvm,docker $$USER
+	@echo
+	@echo "==> Creating libvirt storage at /var/lib/libvirt/images/treehouse"
+	sudo mkdir -p /var/lib/libvirt/images/treehouse
+	sudo chown $$USER: /var/lib/libvirt/images/treehouse
+	@echo
+	@echo "==> Done."
+	@echo "    Open a NEW shell (or log out + back in) so the new groups apply,"
+	@echo "    then run: make up"
+
+toolchain:                 ## Print install command for missing host packages (use bootstrap-host instead)
+	@echo "Prefer:  make bootstrap-host"
+	@echo
+	@echo "Manual:"
 	@echo "  sudo apt install -y \\"
 	@echo "    libvirt-daemon-system libvirt-clients qemu-system-x86 qemu-utils \\"
 	@echo "    virtinst genisoimage \\"
 	@echo "    ansible \\"
 	@echo "    docker.io docker-compose-v2"
 	@echo "  sudo usermod -aG libvirt,kvm,docker \$$(whoami)"
+	@echo "  sudo mkdir -p /var/lib/libvirt/images/treehouse && sudo chown \$$USER: /var/lib/libvirt/images/treehouse"
 	@echo "  newgrp libvirt   # or log out and back in"
 
 clean:                     ## Remove .cache, .venv, ansible cache, .pytest_cache

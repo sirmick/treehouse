@@ -9,41 +9,191 @@ years with minimal attention. Operational design decisions favour
 
 ## Day-0 setup walkthrough
 
-Going from a fresh laptop to a working development VM:
+Going from a fresh Ubuntu/Debian laptop to a working development VM.
+The dance has more steps than you'd expect; most of them are one-time
+permission/group plumbing that bites on first contact.
 
-```
-# Prerequisites: git, vagrant, libvirt (or VirtualBox), ansible
+### 1. One-time host bootstrap
 
-git clone git@github.com:sirmick/treehouse.git
-cd treehouse
-
-# Initial config
-cp config/secrets.example.yml config/secrets.yml
-$EDITOR config/secrets.yml      # set restic password, admin password
-cp manifest.example.yml manifest.yml
-cp kids.example.yml kids.yml
-
-# Bring up the VM
-make up                         # vagrant up + ansible provision
-                                # ~5-10 minutes first time
-
-# First-run content (small, just to validate)
-make manifest-apply             # downloads any ZIMs in manifest.yml
-
-# First kid
-make provision-kids             # provisions accounts in each backend
-
-# Sanity check
-make health                     # all adapters green?
-
-# Add the kids' AP to the LAN bridge (or use the VM's bridge from a tablet)
-# Connect tablet to "treehouse" SSID
-# Browse to home.kids
+```bash
+make bootstrap-host
 ```
 
-The first run is the slowest because container images download and
-the first ZIM is fetched. Subsequent `make up`s on the same machine
-take seconds.
+That's a single make target that runs steps 1–3 below. Idempotent;
+safe to re-run on a partially-set-up box. After it finishes, **start a
+new shell** so the new group memberships apply.
+
+The same steps spelled out, if you'd rather run them by hand:
+
+#### 1a. Host packages
+
+```bash
+sudo apt install -y \
+  libvirt-daemon-system libvirt-clients qemu-system-x86 qemu-utils \
+  virtinst genisoimage \
+  ansible \
+  docker.io docker-compose-v2
+```
+
+#### 1b. Group memberships (one-time)
+
+```bash
+sudo usermod -aG libvirt,kvm,docker $(whoami)
+# Log out + back in, OR open a new shell, OR `newgrp libvirt`.
+# Easiest: just reboot or restart your terminal session.
+```
+
+The catch: an existing shell does NOT see the new groups. `id -nG` in
+the current shell will lie about your effective groups until you start
+a fresh login. If you're driving this from a tmux session that predates
+the usermod, every libvirt/kvm command needs an explicit
+`sg libvirt -c '...'` wrapper. Re-launch the session to make it stop.
+
+#### 1c. VM storage directory (one-time)
+
+VM disks can't live under `/home/$USER/` because `libvirt-qemu`
+(the QEMU runtime user) can't traverse mode-`750` home directories.
+Put them where libvirt naturally expects, owned by you:
+
+```bash
+sudo mkdir -p /var/lib/libvirt/images/treehouse
+sudo chown $USER: /var/lib/libvirt/images/treehouse
+```
+
+The default location is overridable via `TREEHOUSE_STORAGE_DIR`. Once
+created, `bin/up.sh` writes the base image, per-VM disks, seed ISO, and
+file-backed serial log here.
+
+### 2. SSH key (auto-detected)
+
+`bin/up.sh` looks for `~/.ssh/id_ed25519.pub` (then `id_rsa.pub`,
+`id_ecdsa.pub`) and bakes it into the cloud-init seed. If none exists
+it generates an ed25519 keypair for you.
+
+### 3. Bring the VM up
+
+```bash
+make up
+```
+
+What happens:
+
+1. Defines + starts the libvirt `br-kids` bridge network if needed.
+2. Downloads the Debian 12 generic-cloud image (~330 MB) on first run.
+3. Creates a 40 GB system disk (qcow2 overlay on the base) and a 200 GB
+   sparse content disk in `/var/lib/libvirt/images/treehouse/`.
+4. Generates a cloud-init NoCloud seed ISO (attached as virtio-blk —
+   the cloud kernel has no AHCI driver, so a SATA cdrom would be
+   invisible to the guest).
+5. `virt-install --import` boots the VM with two NICs: management on
+   the libvirt `default` net (NAT, gets a DHCP lease around
+   `192.168.122.x`), and isolated on `br-kids`.
+6. Waits ~30 s for cloud-init to settle, then probes SSH.
+7. Writes the dynamic IP into `ansible/inventory/libvirt`.
+
+The serial console is captured to
+`/var/lib/libvirt/images/treehouse/treehouse-console.log`, owned by
+your user so you can `cat` it without sudo. If `make up` hangs or the
+VM never gets an IP, that file is your first stop.
+
+### 4. Provision
+
+Wait until cloud-init has finished its first-boot apt refresh
+(`ssh mick@<ip> 'cloud-init status'` → `done`). Then:
+
+```bash
+make provision
+```
+
+Runs the Ansible playbook against the inventory written by `make up`.
+Roles: `base` → `network` → `proxy` → `docker` → `treehouse-services`
+→ `backup`. Idempotent — re-running on a healthy box should report
+`changed=0`.
+
+The `network` role is the dangerous one: it installs nftables with a
+default-drop input policy, and the SSH carve-out is keyed off the
+detected management interface name. Interface names are discovered via
+ansible facts (`ansible_default_ipv4.interface`), so any naming policy
+works (`enpXsY`, `ethN`, etc.) — but if facts ever return something
+unexpected, expect to lose SSH and recover from the file-backed serial
+console.
+
+### 5. Seed content
+
+```bash
+make seed-wikipedia
+```
+
+SSHes to the VM, curls the top-100-articles Wikipedia ZIM (~50 MB) into
+`/srv/treehouse/content/zims/`, runs `kiwix-manage add` inside the
+container as root (the bind-mounted `library.xml` is owned by the host
+`treehouse` user, so the unprivileged container user can't write
+otherwise), then `docker restart`s kiwix to pick up the new entry.
+
+The `wikipedia_en_for_schools.zim` build is no longer published; the
+`WIKIPEDIA_SEED_NAME` variable in the Makefile points at the closest
+substitute. Bump the date as new builds land at
+<https://download.kiwix.org/zim/wikipedia/>.
+
+### 6. Health checks
+
+```bash
+make verify-isolation   # netns probes; confirms br-kids can't reach upstream
+make restore-drill      # restic restore of the latest snapshot
+make test-live          # pytest against TREEHOUSE_HOST=10.10.10.1
+```
+
+## Daily loop
+
+Most iteration happens via `make dev-up` / `make dev-down` (compose on
+the laptop, no VM). The VM gates exist for milestone checkpoints, not
+per-edit cycles.
+
+When you do touch the VM:
+
+| Want to | Run |
+|---|---|
+| Re-apply ansible after editing a role | `make provision` |
+| Restart just the containers | `ssh mick@<ip> 'sudo docker compose -f /srv/treehouse/compose.yml restart'` |
+| Read the kernel/cloud-init log | `cat /var/lib/libvirt/images/treehouse/treehouse-console.log` |
+| Read kiwix container logs | `ssh mick@<ip> 'sudo docker logs treehouse-kiwix'` |
+| Throw it away and start over | `make down && make up && make provision && make seed-wikipedia` |
+
+## Known paper-cuts (resolved in tree)
+
+These were live bugs found while bringing M1 up the first time. The
+fixes are in the tree, but if you're chasing similar symptoms in a
+fork, the patterns are worth knowing.
+
+- **`virsh` defaults to `qemu:///session` for non-root users.** Bare
+  `virsh` calls in scripts create per-user "phantom" networks that
+  can't bind real bridges. `bin/up.sh` exports
+  `LIBVIRT_DEFAULT_URI=qemu:///system` to force the system scope.
+- **`set -o pipefail` + `grep -q` false negatives.** A pipeline like
+  `cmd | grep -q foo` can return non-zero even when `foo` matched —
+  `grep -q` exits early and the upstream command dies with SIGPIPE.
+  `bin/up.sh` uses `grep ... >/dev/null` (no `-q`) where it matters.
+- **Cloud kernel lacks AHCI.** The Debian generic-cloud kernel ships
+  only virtio block drivers. Attach the cloud-init seed ISO as
+  virtio-blk, not as a SATA cdrom, or the guest doesn't see it and
+  cloud-init silently no-ops.
+- **`<serial type='file'>` ignores dynamic_ownership.** Libvirt creates
+  the file as `root:root 600`. Solved with an explicit DAC seclabel in
+  the virt-install command (`source.seclabel.label=+UID:+GID`), which
+  makes libvirt chown to your user on VM start.
+- **`docker kill -s HUP` doesn't reach kiwix-serve.** Our kiwix
+  entrypoint wraps the binary in a shell so an empty library doesn't
+  crash-loop the container. PID-1 shells ignore HUP unless trapped, so
+  the Makefile uses `docker restart` for library reloads.
+- **Compose relative paths resolve against the compose file's dir.**
+  `./content/zims:/data` in `/srv/treehouse/compose.yml` mounts
+  `/srv/treehouse/content/zims`. Putting the compose file under
+  `/srv/treehouse/config/` would silently mis-resolve the bind-mounts.
+  The role drops it at `/srv/treehouse/` to mirror the repo layout.
+- **systemctl restart systemd-networkd ≠ networkctl reload.** A
+  restart doesn't always re-evaluate `/etc/systemd/network/*.network`
+  against existing links. The handler uses `networkctl reload` to
+  reliably pick up new interface configs.
 
 ## Backup
 

@@ -4,7 +4,8 @@ kids_subnet:        "10.10.10.0/24"
 kids_host_ip:       "10.10.10.1"
 kids_dhcp_start:    "10.10.10.50"
 kids_dhcp_end:      "10.10.10.250"
-kids_iface:         "eth1"          # second NIC on the treehouse VM
+# kids_iface and mgmt_iface are detected dynamically by the network role
+# (set_fact). Don't pin them here — names depend on kernel naming policy.
 kids_bridge:        "br-kids"
 
 # Hostnames served on the kids segment ---------------------------------------
@@ -25,7 +26,8 @@ treehouse_paths:
   - "{{ treehouse_root }}/state"
   - "{{ treehouse_root }}/content"
   - "{{ treehouse_root }}/content/zims"
-  - "{{ treehouse_root }}/launcher"
+  # launcher/ is created + owned by the proxy role as www-data, since
+  # nginx serves it. Keep it out of base/ to avoid an ownership tug-of-war.
   - "{{ treehouse_root }}/logs"
 
 # Backup ---------------------------------------------------------------------

@@ -7,8 +7,10 @@
 
 set -euo pipefail
 
+export LIBVIRT_DEFAULT_URI="qemu:///system"
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CACHE="$REPO_ROOT/.cache"
+STORAGE="${TREEHOUSE_STORAGE_DIR:-/var/lib/libvirt/images/treehouse}"
 NAME="${TREEHOUSE_VM_NAME:-treehouse}"
 
 log() { printf '\033[36m[down]\033[0m %s\n' "$*"; }
@@ -20,11 +22,12 @@ if virsh dominfo "$NAME" >/dev/null 2>&1; then
     virsh undefine "$NAME"
 fi
 
-# Clean up cached disks if undefine didn't remove them
+# Clean up per-VM artifacts if undefine didn't remove them
 rm -f \
-  "$CACHE/$NAME-system.qcow2" \
-  "$CACHE/$NAME-content.qcow2" \
-  "$CACHE/$NAME-seed.iso"
-rm -rf "$CACHE/$NAME-seed"
+  "$STORAGE/$NAME-system.qcow2" \
+  "$STORAGE/$NAME-content.qcow2" \
+  "$STORAGE/$NAME-seed.iso" \
+  "$STORAGE/$NAME-console.log"
+rm -rf "$STORAGE/$NAME-seed"
 
-log "done — base image at $CACHE/debian-12-genericcloud-amd64.qcow2 retained for reuse"
+log "done — base image at $STORAGE/debian-12-genericcloud-amd64.qcow2 retained for reuse"

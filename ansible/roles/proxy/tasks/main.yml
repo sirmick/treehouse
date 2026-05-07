@@ -80,7 +80,10 @@
     owner: root
     group: root
     mode: "0644"
-    validate: "nginx -t -c /etc/nginx/nginx.conf"
+  # Skip ansible's `validate:` here — it requires `%s` for the temp path,
+  # but a sites-available snippet can't be validated standalone (nginx -t
+  # needs the full config tree). The `reload nginx` handler runs `nginx -t`
+  # implicitly and will surface syntax errors there.
   notify: reload nginx
 
 - name: Enable treehouse site

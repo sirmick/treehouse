@@ -9,6 +9,14 @@
     name: restic
     state: present
 
+- name: /etc/treehouse for secrets
+  ansible.builtin.file:
+    path: /etc/treehouse
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+
 - name: restic password file
   ansible.builtin.copy:
     dest: /etc/treehouse/restic.password

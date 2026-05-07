@@ -5,8 +5,9 @@
 # 127.0.0.1:18080 with explicit Host: headers. No dnsmasq needed.
 #
 # Production path (VM): the Ansible treehouse-services role drops this
-# file at /srv/treehouse/config/compose.yml and brings it up with
-# bind-mounts to /srv/treehouse/content/.
+# file at /srv/treehouse/compose.yml (plus the sibling nginx/ + content/
+# trees) so the relative volume paths resolve the same way as on the
+# laptop.
 #
 # Future milestones add kolibri, sugarizer, peertube, synapse,
 # calibre-web, tileserver, ollama, launcher, searchd, aigateway. Each
@@ -26,18 +27,34 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/sites:/srv/launcher:ro
     networks: [treehouse-net]
+    # service_started, not service_healthy: the launcher (home.kids,
+    # sinkhole) must come up even before any ZIM has been seeded. With
+    # service_healthy, an empty library would block all routes including
+    # the home page.
     depends_on:
       kiwix:
-        condition: service_healthy
+        condition: service_started
 
   kiwix:
     image: ghcr.io/kiwix/kiwix-serve:3.7.0
     container_name: treehouse-kiwix
     restart: unless-stopped
     volumes:
-      - ./content/zims:/data:ro
-    # kiwix-serve image entrypoint already binds port 8080.
-    command: ["--library", "/data/library.xml"]
+      # rw because `kiwix-manage add` writes /data/library.xml at seed time.
+      - ./content/zims:/data
+    # Wrap kiwix-serve so an empty library.xml (no ZIMs seeded yet)
+    # doesn't restart-loop the container. kiwix-tools 3.7.0 treats an
+    # empty library as a load failure and exits — we'd rather idle and
+    # let `make seed-wikipedia` populate the library, then restart us.
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        if /usr/local/bin/kiwix-serve --port=8080 --library /data/library.xml; then
+          :
+        else
+          echo "kiwix-serve exited (empty library?) — idling. Run make seed-wikipedia, then docker restart treehouse-kiwix." >&2
+          exec sleep infinity
+        fi
     networks: [treehouse-net]
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/ || exit 1"]

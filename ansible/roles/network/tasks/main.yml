@@ -3,6 +3,19 @@
 # dnsmasq as DHCP+DNS authority, nftables as the drop-all-forward
 # defense layer. See docs/network.md.
 
+# ----- Detect interfaces ---------------------------------------------------
+# Don't assume eth0/eth1. With Debian's default predictable naming the
+# interfaces are enpXsY; with `net.ifnames=0` they're ethN. We bind to
+# whatever the kernel actually has so the playbook works either way.
+- name: Detect mgmt + kids interfaces
+  ansible.builtin.set_fact:
+    mgmt_iface: "{{ ansible_default_ipv4.interface }}"
+    kids_iface: "{{ (ansible_facts.interfaces | difference(['lo', ansible_default_ipv4.interface]) | sort) | first }}"
+
+- name: Show detected interfaces
+  ansible.builtin.debug:
+    msg: "mgmt={{ mgmt_iface }}  kids={{ kids_iface }}"
+
 - name: Required packages
   ansible.builtin.apt:
     name:
@@ -11,8 +24,6 @@
     state: present
 
 # ----- Static IP on the kids interface --------------------------------------
-# Vagrant configures eth1 with the IP from Vagrantfile, but we re-assert it
-# here so a vanilla `apt-get install` doesn't undo anything.
 - name: Persist kids interface config (systemd-networkd)
   ansible.builtin.copy:
     dest: /etc/systemd/network/10-kids.network
@@ -29,6 +40,11 @@
       LinkLocalAddressing=no
       IPv6AcceptRA=no
   notify: reload networkd
+
+# Flush now so the kids interface gets its IP before dnsmasq tries to
+# bind to listen-address=10.10.10.1 below.
+- name: Apply network changes immediately
+  ansible.builtin.meta: flush_handlers
 
 # ----- dnsmasq --------------------------------------------------------------
 - name: Disable dnsmasq listening on the default resolver port for systemd-resolved hosts
@@ -56,7 +72,9 @@
 
       # DHCP scope. NO gateway. NO upstream DNS.
       dhcp-range={{ kids_dhcp_start }},{{ kids_dhcp_end }},12h
-      dhcp-option=option:router,
+      # Send option 3 (router) empty — kids segment is isolated, no gateway.
+      # `option:router,` (named) requires a value; raw `3` allows empty.
+      dhcp-option=3
       dhcp-option=option:dns-server,{{ kids_host_ip }}
       dhcp-option=option:domain-name,{{ kids_domain }}
       dhcp-option=option:ntp-server,{{ kids_host_ip }}
@@ -110,9 +128,9 @@
               # ICMP for ping diagnostics.
               iifname "{{ kids_iface }}" ip protocol icmp accept
 
-              # Vagrant management interface (eth0): SSH only.
-              iifname "eth0" tcp dport 22 accept
-              iifname "eth0" ct state new tcp dport 22 accept
+              # Management interface ({{ mgmt_iface }}): SSH only.
+              iifname "{{ mgmt_iface }}" tcp dport 22 accept
+              iifname "{{ mgmt_iface }}" ct state new tcp dport 22 accept
           }
 
           chain output {

@@ -7,18 +7,31 @@
 
 set -euo pipefail
 
+# Ensure all virsh calls hit the system scope. Without this, virsh defaults to
+# qemu:///session for non-root users and creates a phantom per-user network
+# that can't bind real bridge interfaces.
+export LIBVIRT_DEFAULT_URI="qemu:///system"
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CACHE="$REPO_ROOT/.cache"
+# VM disks live where libvirt-qemu can read them without /home traversal.
+# One-time setup: sudo mkdir -p $STORAGE && sudo chown $(whoami): $STORAGE
+STORAGE="${TREEHOUSE_STORAGE_DIR:-/var/lib/libvirt/images/treehouse}"
 NAME="${TREEHOUSE_VM_NAME:-treehouse}"
 MEMORY="${TREEHOUSE_VM_MEMORY:-8192}"
 VCPUS="${TREEHOUSE_VM_VCPUS:-4}"
 SYSTEM_DISK_GB="${TREEHOUSE_SYSTEM_DISK_GB:-40}"
 CONTENT_DISK_GB="${TREEHOUSE_CONTENT_DISK_GB:-200}"
 BASE_IMAGE_URL="https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2"
-BASE_IMAGE="$CACHE/debian-12-genericcloud-amd64.qcow2"
+BASE_IMAGE="$STORAGE/debian-12-genericcloud-amd64.qcow2"
 NET_XML="$REPO_ROOT/ansible/files/br-kids.xml"
 
-mkdir -p "$CACHE"
+if [[ ! -d "$STORAGE" || ! -w "$STORAGE" ]]; then
+  echo "missing or unwritable: $STORAGE" >&2
+  echo "one-time setup:" >&2
+  echo "  sudo mkdir -p $STORAGE && sudo chown $(whoami): $STORAGE" >&2
+  exit 1
+fi
+
 log() { printf '\033[36m[up]\033[0m %s\n' "$*"; }
 
 # ----- prerequisites --------------------------------------------------------
@@ -36,7 +49,10 @@ if ! virsh net-info br-kids >/dev/null 2>&1; then
   virsh net-start br-kids
 else
   log "br-kids network already defined"
-  virsh net-info br-kids | grep -q 'Active:.*yes' || virsh net-start br-kids
+  # grep without -q so virsh can finish writing — under `set -o pipefail`,
+  # `grep -q` matches early, closes stdin, and virsh dies with SIGPIPE,
+  # making the pipeline look failed even when Active: yes.
+  virsh net-info br-kids | grep 'Active:.*yes' >/dev/null || virsh net-start br-kids
 fi
 
 # ----- base image -----------------------------------------------------------
@@ -47,8 +63,8 @@ if [[ ! -f "$BASE_IMAGE" ]]; then
 fi
 
 # ----- per-VM disk ----------------------------------------------------------
-SYSTEM_DISK="$CACHE/$NAME-system.qcow2"
-CONTENT_DISK="$CACHE/$NAME-content.qcow2"
+SYSTEM_DISK="$STORAGE/$NAME-system.qcow2"
+CONTENT_DISK="$STORAGE/$NAME-content.qcow2"
 
 if ! virsh dominfo "$NAME" >/dev/null 2>&1; then
   log "creating $NAME system disk (${SYSTEM_DISK_GB}G overlay on base image)"
@@ -70,8 +86,8 @@ if [[ -z "$SSH_KEY" ]]; then
   SSH_KEY="$(cat "$HOME/.ssh/id_ed25519.pub")"
 fi
 
-SEED_DIR="$CACHE/$NAME-seed"
-SEED_ISO="$CACHE/$NAME-seed.iso"
+SEED_DIR="$STORAGE/$NAME-seed"
+SEED_ISO="$STORAGE/$NAME-seed.iso"
 
 mkdir -p "$SEED_DIR"
 cat > "$SEED_DIR/meta-data" <<EOF
@@ -92,20 +108,16 @@ users:
     shell: /bin/bash
     groups: [sudo, docker]
     ssh_authorized_keys:
-      - $SEEDKEY
+      - $SSH_KEY
   - name: root
     ssh_authorized_keys:
-      - $SEEDKEY
+      - $SSH_KEY
 package_update: true
 packages:
   - qemu-guest-agent
 runcmd:
-  - sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 net.ifnames=0 biosdevname=0"/' /etc/default/grub
-  - update-grub
   - systemctl enable --now qemu-guest-agent
 EOF
-# Inject the actual key (heredoc avoids YAML quoting hell)
-sed -i "s|\$SEEDKEY|$SSH_KEY|g" "$SEED_DIR/user-data"
 
 if command -v genisoimage >/dev/null; then
   ISO_TOOL=genisoimage
@@ -118,7 +130,7 @@ $ISO_TOOL -quiet -output "$SEED_ISO" -volid cidata -joliet -rock \
 # ----- create VM ------------------------------------------------------------
 if virsh dominfo "$NAME" >/dev/null 2>&1; then
   log "$NAME already defined — starting if not running"
-  virsh dominfo "$NAME" | grep -q 'State:.*running' || virsh start "$NAME"
+  virsh dominfo "$NAME" | grep 'State:.*running' >/dev/null || virsh start "$NAME"
 else
   log "creating $NAME via virt-install (this takes ~30s)"
   virt-install \
@@ -129,10 +141,11 @@ else
     --osinfo debian12 \
     --disk path="$SYSTEM_DISK",bus=virtio \
     --disk path="$CONTENT_DISK",bus=virtio \
-    --disk path="$SEED_ISO",device=cdrom \
+    --disk path="$SEED_ISO",bus=virtio,readonly=on \
     --network network=default,model=virtio \
     --network network=br-kids,model=virtio \
     --graphics none \
+    --serial file,source.path="$STORAGE/$NAME-console.log",source.seclabel.model=dac,source.seclabel.relabel=yes,source.seclabel.label="+$(id -u):+$(id -g)" \
     --noautoconsole \
     --import
 fi
