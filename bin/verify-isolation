@@ -28,11 +28,14 @@ else
 fi
 
 # --- DNS resolution --------------------------------------------------------
+# Use `getent hosts`, not nslookup/dig: glibc's NSS path is present on
+# every Debian/Alpine cloud image without extra packages, and the tablet
+# has no upstream so cloud-init can't apt-install dnsutils.
 printf '\n[dns]\n'
 EXPECT_IP="10.10.10.1"
 
 # .kids names → host
-RESOLVED=$(nslookup home.kids 2>/dev/null | awk '/^Address: / {print $2}' | head -1)
+RESOLVED=$(getent hosts home.kids 2>/dev/null | awk '{print $1; exit}')
 if [ "$RESOLVED" = "$EXPECT_IP" ]; then
     ok  "home.kids → $EXPECT_IP"
 else
@@ -40,7 +43,7 @@ else
 fi
 
 # Non-.kids names → host (sinkhole)
-RESOLVED=$(nslookup youtube.com 2>/dev/null | awk '/^Address: / {print $2}' | head -1)
+RESOLVED=$(getent hosts youtube.com 2>/dev/null | awk '{print $1; exit}')
 if [ "$RESOLVED" = "$EXPECT_IP" ]; then
     ok  "youtube.com sinkholed to $EXPECT_IP"
 else
