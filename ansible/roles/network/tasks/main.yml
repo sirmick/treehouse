@@ -7,10 +7,17 @@
 # Don't assume eth0/eth1. With Debian's default predictable naming the
 # interfaces are enpXsY; with `net.ifnames=0` they're ethN. We bind to
 # whatever the kernel actually has so the playbook works either way.
+#
+# IMPORTANT: filter to physical-NIC name patterns (en*, eth*). A naive
+# "first non-default interface" picks docker's br-XXXXXXXXXX once the
+# treehouse-services role has run, and 10.10.10.1 ends up on the docker
+# bridge instead of the kids NIC — silently, since `curl 10.10.10.1`
+# from inside the VM still works (the docker bridge IS reachable from
+# the host netns). The tablet-VM verify-isolation probe catches it.
 - name: Detect mgmt + kids interfaces
   ansible.builtin.set_fact:
     mgmt_iface: "{{ ansible_default_ipv4.interface }}"
-    kids_iface: "{{ (ansible_facts.interfaces | difference(['lo', ansible_default_ipv4.interface]) | sort) | first }}"
+    kids_iface: "{{ (ansible_facts.interfaces | select('match', '^(en|eth)') | difference([ansible_default_ipv4.interface]) | sort) | first }}"
 
 - name: Show detected interfaces
   ansible.builtin.debug:
