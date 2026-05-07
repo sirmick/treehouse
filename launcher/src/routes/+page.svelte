@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { activeHost } from '$lib/config';
+
 	type Tile = {
 		label: string;
 		emoji: string;
@@ -6,7 +8,7 @@
 	};
 
 	const tiles: Tile[] = [
-		{ label: 'Wikipedia', emoji: '📚', href: 'http://wikipedia.kids/' },
+		{ label: 'Wikipedia', emoji: '📚', href: `http://${activeHost('wikipedia')}/` },
 		{ label: 'Books', emoji: '📖' },
 		{ label: 'Videos', emoji: '🎬' },
 		{ label: 'Khan Academy', emoji: '🎓' },

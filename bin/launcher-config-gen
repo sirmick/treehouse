@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Generate launcher/src/lib/config.ts from treehouse.yml.
+#
+# The launcher needs to know the deployment's network mode and hostname
+# aliases so tile hrefs render the right (public vs internal) name.
+# Everything else (the API surface, secrets, etc.) stays out of the
+# build artifact — only what's actually needed to render the page.
+#
+# Idempotent: re-running with no treehouse.yml change is a no-op file
+# write, so make's mtime-driven recompile loop stays well-behaved.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CONFIG="${TREEHOUSE_CONFIG:-$REPO_ROOT/treehouse.yml}"
+OUT="$REPO_ROOT/launcher/src/lib/config.ts"
+
+[[ -f "$CONFIG" ]] || { echo "config not found: $CONFIG" >&2; exit 1; }
+
+mkdir -p "$(dirname "$OUT")"
+
+python3 - "$CONFIG" "$OUT" <<'PY'
+import json
+import sys
+import yaml
+
+config_path, out_path = sys.argv[1], sys.argv[2]
+with open(config_path) as f:
+    cfg = yaml.safe_load(f)
+
+mode = cfg["network"]["mode"]
+hostnames = cfg["hostnames"]
+
+content = f"""// AUTO-GENERATED from /treehouse.yml by bin/launcher-config-gen.
+// Do not edit by hand — re-run `make launcher-config` instead.
+
+export type NetworkMode = "isolated" | "lan";
+
+export type Hostname = {{
+\tinternal: string;
+\tpublic: string;
+}};
+
+export const networkMode: NetworkMode = {json.dumps(mode)};
+
+export const hostnames = {json.dumps(hostnames, indent='\t', sort_keys=False)} as const satisfies Record<string, Hostname>;
+
+/**
+ * Active hostname for a given service id — public alias when running
+ * on the LAN, internal `.kids` name when running in isolated mode.
+ */
+export function activeHost(id: keyof typeof hostnames): string {{
+\treturn networkMode === "lan" ? hostnames[id].public : hostnames[id].internal;
+}}
+"""
+
+with open(out_path, "w") as f:
+    f.write(content)
+
+print(f"wrote {out_path}", file=sys.stderr)
+PY
