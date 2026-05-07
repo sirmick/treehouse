@@ -25,7 +25,9 @@ services:
       - "127.0.0.1:18080:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/sites:/srv/launcher:ro
+      # SvelteKit-built static assets. `make build-launcher` (or
+      # `npm run build` in launcher/) populates this dir.
+      - ./launcher/build:/srv/launcher:ro
     networks: [treehouse-net]
     # service_started, not service_healthy: the launcher (home.kids,
     # sinkhole) must come up even before any ZIM has been seeded. With
@@ -39,13 +41,6 @@ services:
     image: ghcr.io/kiwix/kiwix-serve:3.7.0
     container_name: treehouse-kiwix
     restart: unless-stopped
-    ports:
-      # Loopback-only on the compose host. The host nginx (provisioned
-      # by the Ansible proxy role) reverse-proxies wikipedia.kids to
-      # 127.0.0.1:8080, so kiwix needs to be reachable from the VM's
-      # loopback. Bound to 127.0.0.1 so it doesn't leak onto br-kids
-      # or the mgmt interface.
-      - "127.0.0.1:8080:8080"
     volumes:
       # rw because `kiwix-manage add` writes /data/library.xml at seed time.
       - ./content/zims:/data

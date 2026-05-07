@@ -26,13 +26,17 @@ server {
     }
 }
 
-# wikipedia.kids — reverse proxy to the kiwix container on host:8080.
+# wikipedia.kids — forward to the compose proxy (127.0.0.1:18080),
+# which routes by Host header to kiwix on the docker bridge. Keeps
+# the host nginx ignorant of compose's internal IPs and means kiwix
+# itself doesn't need a host-side port published (avoiding the
+# collision where 8080 is taken on the laptop dev path).
 server {
     listen {{ kids_host_ip }}:80;
     server_name wikipedia.kids;
 
     location / {
-        proxy_pass http://127.0.0.1:8080;
+        proxy_pass http://127.0.0.1:18080;
         proxy_http_version 1.1;
         proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;

@@ -12,66 +12,32 @@
     state: absent
   notify: reload nginx
 
-- name: nginx data dir for static sites
-  ansible.builtin.file:
-    path: "{{ treehouse_root }}/launcher"
-    state: directory
-    owner: www-data
-    group: www-data
-    mode: "0755"
+# Copy the SvelteKit static build (launcher/build/) onto the box.
+# Run `make launcher-build` on the laptop before `make provision`; the
+# task fails loudly if the dir doesn't exist rather than serving stale
+# content silently.
+- name: Confirm launcher build artifacts exist
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/../launcher/build/index.html"
+  register: launcher_build
+  delegate_to: localhost
+  become: false
 
-- name: Static placeholder home page
+- name: Fail if launcher hasn't been built
+  ansible.builtin.fail:
+    msg: |
+      launcher/build/index.html is missing. Run `make launcher-build`
+      on the laptop before `make provision`.
+  when: not launcher_build.stat.exists
+
+- name: Sync launcher build to {{ treehouse_root }}/launcher
   ansible.builtin.copy:
-    dest: "{{ treehouse_root }}/launcher/index.html"
+    src: "{{ playbook_dir }}/../launcher/build/"
+    dest: "{{ treehouse_root }}/launcher/"
     owner: www-data
     group: www-data
     mode: "0644"
-    content: |
-      <!doctype html>
-      <html lang="en">
-      <head>
-        <meta charset="utf-8">
-        <title>Treehouse</title>
-        <style>
-          body { font-family: system-ui, sans-serif; max-width: 40em;
-                 margin: 4em auto; padding: 0 1em; line-height: 1.5; }
-          a { font-size: 1.5em; padding: 0.5em 1em; display: inline-block;
-              background: #f0f4f8; border-radius: 0.5em; text-decoration: none;
-              color: #2c3e50; }
-          a:hover { background: #d6e1ec; }
-        </style>
-      </head>
-      <body>
-        <h1>Treehouse</h1>
-        <p>This is a friendly little corner of the internet.</p>
-        <p><a href="http://wikipedia.kids/">Wikipedia for Schools</a></p>
-      </body>
-      </html>
-
-- name: Sinkhole landing page
-  ansible.builtin.copy:
-    dest: "{{ treehouse_root }}/launcher/sinkhole.html"
-    owner: www-data
-    group: www-data
-    mode: "0644"
-    content: |
-      <!doctype html>
-      <html lang="en">
-      <head>
-        <meta charset="utf-8">
-        <title>Not at home</title>
-        <style>
-          body { font-family: system-ui, sans-serif; max-width: 30em;
-                 margin: 6em auto; padding: 0 1em; text-align: center;
-                 line-height: 1.5; }
-          a { color: #2c3e50; }
-        </style>
-      </head>
-      <body>
-        <h1>That's not something we have at home.</h1>
-        <p>Try <a href="http://home.kids/">home.kids</a>.</p>
-      </body>
-      </html>
+    directory_mode: "0755"
 
 - name: nginx site config
   ansible.builtin.template:

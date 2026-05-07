@@ -1,5 +1,6 @@
 .PHONY: help \
         bootstrap-host \
+        launcher-deps launcher-build launcher-dev \
         dev-up dev-down dev-restart dev-logs \
         up down provision health ssh-treehouse \
         verify-isolation seed-wikipedia backup restore-drill \
@@ -33,11 +34,21 @@ WIKIPEDIA_SEED_URL  := https://download.kiwix.org/zim/wikipedia/$(WIKIPEDIA_SEED
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | awk -F: '{ printf "  %-22s %s\n", $$1, $$NF }'
 
+# ----- launcher (SvelteKit static frontend) --------------------------------
+launcher-deps:             ## npm install in launcher/ (run once after a fresh clone)
+	cd launcher && npm install
+
+launcher-build:            ## Build static launcher assets into launcher/build/
+	cd launcher && npm run build
+
+launcher-dev:              ## Vite dev server for the launcher (hot reload, port 5173)
+	cd launcher && npm run dev
+
 # ----- daily dev (compose, no VM) ------------------------------------------
-dev-up:                    ## docker compose up -d (caddy + kiwix on the laptop)
+dev-up: launcher-build     ## docker compose up -d (nginx + kiwix on the laptop)
 	$(COMPOSE_DEV) up -d
 	@echo
-	@echo "  Caddy: http://127.0.0.1:18080"
+	@echo "  Proxy: http://127.0.0.1:18080"
 	@echo "  Try:   curl -H 'Host: home.kids' http://127.0.0.1:18080/"
 
 dev-down:                  ## docker compose down
