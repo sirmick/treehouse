@@ -23,6 +23,9 @@ launcher/.svelte-kit/
 *.swp
 *~
 
+# Claude Code's per-project runtime state (scheduled-task locks, etc.)
+.claude/
+
 # Local secrets and state — never commit
 config/secrets.yml
 state/

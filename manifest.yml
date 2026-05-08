@@ -17,4 +17,6 @@
 # the file is already in the right shape.
 
 zims:
-  - name: wikipedia_en_100_maxi
+  - name: wikipedia_en_simple_all_maxi    # Simple English Wikipedia, with images
+  - name: wiktionary_en_simple_all_nopic  # Simple English Wiktionary, no images
+  - name: vikidia_en_all_maxi             # Vikidia (kid-written encyclopedia), with images

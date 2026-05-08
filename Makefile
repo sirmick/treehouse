@@ -2,8 +2,8 @@
         bootstrap-host \
         launcher-deps launcher-config launcher-build launcher-dev \
         dev-up dev-down dev-restart dev-logs \
-        up down provision health ssh-treehouse \
-        verify-isolation seed-wikipedia ingest backup restore-drill \
+        up down wipe-content provision health ssh-treehouse \
+        verify-isolation seed ingest backup restore-drill \
         test test-schemas test-compose test-live test-all test-deps \
         toolchain clean
 
@@ -26,14 +26,10 @@ PLAYBOOK    := $(ANSIBLE_DIR)/site.yml
 COMPOSE     := docker compose
 COMPOSE_DEV := $(COMPOSE) -p treehouse
 
-# Wikipedia seed: catalog name comes from manifest.yml (zims[0]); the
-# version date is hardcoded here as a stop-gap until the Phase-3
-# updater (docs/content.md) lands and resolves the latest from the
-# library.kiwix.org OPDS catalog. Bump the date as new builds land.
-ZIM_NAME            = $(shell bin/cfg -f manifest.yml zims.0.name)
-WIKIPEDIA_SEED_DATE := 2026-04
-WIKIPEDIA_SEED_FILE  = $(ZIM_NAME)_$(WIKIPEDIA_SEED_DATE).zim
-WIKIPEDIA_SEED_URL   = https://download.kiwix.org/zim/wikipedia/$(WIKIPEDIA_SEED_FILE)
+# ZIM versioning lives in bin/ingest-all.sh and bin/seed-vm.sh (the
+# (kiwix-dir, catalog-name, version-date) tuples). Until the Phase-3
+# updater lands those scripts are the bridge between manifest.yml's
+# catalog names and concrete download URLs.
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' Makefile | awk -F: '{ printf "  %-22s %s\n", $$1, $$NF }'
@@ -74,8 +70,16 @@ dev-status:                ## ps the dev stack
 up:                        ## Bring up the treehouse VM via libvirt
 	bin/up.sh
 
-down:                      ## Tear down the treehouse VM
+down:                      ## Tear down the treehouse VM (preserves content disk)
 	bin/down.sh
+
+wipe-content:              ## Delete the content qcow2 (next make up re-creates it blank)
+	@CD="$${TREEHOUSE_STORAGE_DIR:-/var/lib/libvirt/images/treehouse}/treehouse-content.qcow2"; \
+	if [ -f "$$CD" ]; then \
+	  echo "removing $$CD"; rm -f "$$CD"; \
+	else \
+	  echo "no content disk at $$CD (already wiped)"; \
+	fi
 
 provision:                 ## ansible-playbook against the VM
 	cd $(ANSIBLE_DIR) && ansible-playbook -i inventory/libvirt site.yml
@@ -98,25 +102,11 @@ verify-isolation:          ## Spin a throwaway tablet VM on br-kids and run the 
 	bin/verify-isolation-via-tablet.sh
 
 # ----- content -------------------------------------------------------------
-LOCAL_ZIM := content/zims/$(WIKIPEDIA_SEED_FILE)
+seed:                      ## VM: download every ZIM in bin/seed-vm.sh, kiwix-manage add, restart kiwix
+	bin/seed-vm.sh
 
-seed-wikipedia:            ## Fetch the manifest.yml zims[0] file (versioned by WIKIPEDIA_SEED_DATE)
-	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
-	ssh mick@$$IP "sudo curl -L -o /srv/treehouse/content/zims/$(WIKIPEDIA_SEED_FILE) $(WIKIPEDIA_SEED_URL) && \
-	  sudo docker exec --user root treehouse-kiwix kiwix-manage /data/library.xml add /data/$(WIKIPEDIA_SEED_FILE) && \
-	  sudo docker restart treehouse-kiwix"
-
-$(LOCAL_ZIM):
-	@mkdir -p content/zims
-	@echo "==> downloading $(WIKIPEDIA_SEED_FILE) (~50 MB)"
-	curl -L --fail --progress-bar -o "$(LOCAL_ZIM).partial" "$(WIKIPEDIA_SEED_URL)"
-	mv "$(LOCAL_ZIM).partial" "$(LOCAL_ZIM)"
-
-ingest: $(LOCAL_ZIM)        ## Walk the ZIM and index its articles into MeiliSearch (laptop dev path)
-	.venv/bin/python -m treehouse.searchd.ingest_kiwix \
-	  --zim $(LOCAL_ZIM) \
-	  --meili-url $${MEILI_URL:-http://127.0.0.1:7700} \
-	  --index treehouse
+ingest:                    ## Laptop dev (or via SSH-forward): download + ingest every ZIM
+	bin/ingest-all.sh
 
 # ----- backup --------------------------------------------------------------
 backup:                    ## Trigger a one-shot restic snapshot now

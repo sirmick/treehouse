@@ -143,6 +143,8 @@ def main() -> int:
                    help="MeiliSearch index name")
     p.add_argument("--source", default="wikipedia",
                    help="`source` value for indexed documents")
+    p.add_argument("--kind", default="article",
+                   help="`kind` value for indexed documents (article/definition/etc.)")
     p.add_argument("--book-name", default=None,
                    help="Override the ZIM's Name metadata; defaults to its self-declared name")
     p.add_argument("--batch-size", default=200, type=int)
@@ -161,20 +163,22 @@ def main() -> int:
     client = meilisearch.Client(args.meili_url, args.meili_key)
 
     # Idempotent: create index if missing, otherwise leave existing in place.
+    # We don't wait on these tasks — MeiliSearch processes them in order
+    # behind any ongoing indexing work, and a busy queue can blow past
+    # the python client's default 5s wait. add_documents below queues
+    # after them by virtue of order.
     try:
-        task = client.create_index(args.index, {"primaryKey": "id"})
-        client.wait_for_task(task.task_uid)
+        client.create_index(args.index, {"primaryKey": "id"})
     except meilisearch.errors.MeilisearchApiError as e:
         if "index_already_exists" not in str(e):
             raise
 
     index = client.index(args.index)
-    settings_task = index.update_settings({
+    index.update_settings({
         "searchableAttributes": ["title", "body", "snippet"],
         "filterableAttributes": ["source", "kind", "language"],
         "sortableAttributes": ["indexed_at"],
     })
-    client.wait_for_task(settings_task.task_uid)
 
     indexed_at = dt.datetime.now(dt.timezone.utc).isoformat()
     batch: list[dict] = []
@@ -212,7 +216,7 @@ def main() -> int:
                 "body": chunk,
                 "snippet": chunk[:200],
                 "source": args.source,
-                "kind": "article",
+                "kind": args.kind,
                 "deeplink_book": book_name,
                 "deeplink_path": path,
                 "language": "en",

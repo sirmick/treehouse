@@ -11,6 +11,14 @@
 		deeplink_path?: string;
 	};
 
+	// Source → display label + emoji. All three are kiwix-served, so
+	// the URL builder is the same; the badge differs.
+	const SOURCE_BADGE: Record<string, { label: string; emoji: string }> = {
+		wikipedia: { label: 'Wikipedia', emoji: '📚' },
+		wiktionary: { label: 'Wiktionary', emoji: '📖' },
+		vikidia: { label: 'Vikidia', emoji: '🌱' }
+	};
+
 	let query = $state('');
 	let hits = $state<Hit[]>([]);
 	let busy = $state(false);
@@ -18,14 +26,19 @@
 	let lastQuery = $state('');
 
 	function urlFor(hit: Hit): string {
-		// Build the canonical kiwix URL for the hit's source. For now
-		// every hit is from `wikipedia`; this expands cleanly when other
-		// sources (kolibri, peertube) are added with their own active
-		// hosts in treehouse.yml.
-		if (hit.source === 'wikipedia' && hit.deeplink_book && hit.deeplink_path) {
+		// Every kiwix-served source (wikipedia / wiktionary / vikidia)
+		// is reachable through the wikipedia.kids vhost; kiwix routes
+		// by book name in the path. The vhost is named for the most
+		// prominent source — when other source kinds (kolibri, peertube)
+		// arrive they'll get their own activeHost() entries.
+		if (hit.deeplink_book && hit.deeplink_path) {
 			return `http://${activeHost('wikipedia')}/content/${hit.deeplink_book}/${hit.deeplink_path}`;
 		}
 		return '#';
+	}
+
+	function badgeFor(source: string) {
+		return SOURCE_BADGE[source] ?? { label: source, emoji: '📄' };
 	}
 
 	async function search(e: SubmitEvent) {
@@ -104,8 +117,9 @@
 								<h2 class="text-lg font-medium text-slate-800 sm:text-xl">
 									{hit.title}
 								</h2>
-								<span class="shrink-0 text-xs uppercase tracking-wider text-slate-400">
-									{hit.source}
+								<span class="shrink-0 text-xs font-medium tracking-wide text-slate-400">
+									<span aria-hidden="true">{badgeFor(hit.source).emoji}</span>
+									{badgeFor(hit.source).label}
 								</span>
 							</div>
 							<p class="mt-2 text-sm text-slate-600 sm:text-base">
