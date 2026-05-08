@@ -114,7 +114,8 @@ The split is governed by two questions:
 | tileserver | `maptiler/tileserver-gl` | OSM map tiles |
 | ollama | `ollama/ollama` | Local LLM serving |
 | launcher | (Treehouse) | Identity broker + kid UX |
-| searchd | (Treehouse) | Federated search aggregator |
+| meilisearch | `getmeili/meilisearch` | Hybrid (BM25 + vector) index over all content; fed by searchd's ingestors, queried by both the launcher search bar and the AI gateway |
+| searchd | (Treehouse) | Per-source ingestors + thin read shim over MeiliSearch (kid-aware filters, ranking adjustments, activity log) |
 | aigateway | (Treehouse) | RAG orchestration in front of Ollama |
 | updater | (Treehouse) | Content sync, runs as oneshot via systemd timer |
 | provisioner | (Treehouse) | Kid account sync, runs on `kids.yml` change |
@@ -139,8 +140,8 @@ The split is governed by two questions:
 
 4. Kid searches "volcanoes" in launcher
    └─► launcher → searchd /api/search?q=volcanoes&kid_id=alice
-       ├─► fans out to kiwix, kolibri, peertube, calibre, sugarizer
-       ├─► merges, ranks by Alice's age band, dedupes
+       ├─► hybrid (BM25 + vector) query against MeiliSearch
+       ├─► reranks by Alice's age band + click history
        └─► returns grouped results (Read / Watch / Learn / Play)
 
 5. Kid asks the AI companion "why do volcanoes erupt"
@@ -178,8 +179,9 @@ Open-weights small models (3–8B parameters) hallucinate confidently. A
 confidently-wrong answer in a learning context is worse than no answer.
 Treehouse's AI is wired so the model **never recalls facts from training** —
 it only synthesizes responses from search results retrieved by `searchd`
-inside the box's own library. If asked about something not in the library,
-it says so. This is enforced at the gateway layer, not by the prompt alone.
+(via MeiliSearch's hybrid index) inside the box's own library. If asked
+about something not in the library, it says so. This is enforced at the
+gateway layer, not by the prompt alone.
 
 See [ai.md](ai.md) for prompt design and guardrails.
 

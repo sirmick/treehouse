@@ -150,6 +150,9 @@ Explicitly rejected:
 - Renders the latest content-update report inline.
 - Per-adapter health badges.
 - Lists each kid's recent activity (top services, top searches).
+- Per-kid AI profile review at `admin.kids/profile/<kid_id>`:
+  the rendered profile, regenerate-from-raw-log button, parent-notes
+  override, clear button. See `ai.md § Per-kid context profile`.
 - Inline editor for `kids.yml` and `manifest.yml`, with a "save"
   that performs a git commit and triggers provisioner / updater.
 

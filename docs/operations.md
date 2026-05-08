@@ -285,7 +285,8 @@ Treehouse — system health (last update 14:32:11)
 ✓  calibre-web   200 OK · 612 books
 ✓  tileserver    200 OK · 1 region (great-britain)
 ✓  ollama        200 OK · model loaded: llama3.2:3b-q4_K_M
-✓  searchd       200 OK · cache: 1247 entries
+✓  meilisearch   200 OK · 47k docs indexed
+✓  searchd       200 OK · last ingest: 4h ago
 ✓  aigateway     200 OK · transcripts today: 4
 
 Disk:    312 GB / 1024 GB used   ░░░░██░░░░░░░░░░  30%

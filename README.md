@@ -36,9 +36,11 @@ A box (VM today, Raspberry Pi later) running:
 - **OpenStreetMap** tile server for offline maps.
 - **Synapse** (Matrix) for LAN-only family/friend messaging, federation off.
 - **Treehouse's own services**: launcher (identity + UX), `searchd`
-  (federated search across all of the above), `aigateway` (RAG-only local
-  LLM as a learning companion), `updater` (idempotent content sync from a
-  declarative manifest), `provisioner` (declarative kid-account management).
+  (per-source ingestors + a thin read shim over a hybrid MeiliSearch index;
+  serves both the launcher search bar and the AI's RAG retrieval),
+  `aigateway` (RAG-only local LLM as a learning companion), `updater`
+  (idempotent content sync from a declarative manifest), `provisioner`
+  (declarative kid-account management).
 
 ## Architecture summary
 
@@ -55,7 +57,8 @@ A box (VM today, Raspberry Pi later) running:
               │   Containers:                                │
               │    kiwix · kolibri · sugarizer · peertube    │
               │    synapse · calibre · tileserver · ollama   │
-              │    launcher · searchd · aigateway            │
+              │    meilisearch · launcher · searchd          │
+              │    aigateway                                 │
               │                                              │
               │   /srv/treehouse/                            │
               │     ├── config/   (in git)                   │

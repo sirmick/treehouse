@@ -24,7 +24,7 @@ network:
   #                  disabled — the LAN's existing resolver is used. Trade:
   #                  no structural isolation, so `verify-isolation` no
   #                  longer applies and is gated off in this mode.
-  mode: isolated
+  mode: lan
 
   isolated:
     subnet:     10.10.10.0/24
