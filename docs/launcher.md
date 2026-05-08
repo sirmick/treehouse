@@ -23,7 +23,8 @@ right to be the most carefully designed and the most thoroughly tested.
    All business logic lives in a `LauncherClient` class that's
    unit-testable without a browser.
 5. **Deployable as static assets.** The frontend is a SvelteKit
-   build that Caddy serves directly from `/srv/treehouse/launcher/`.
+   build (adapter-static) that nginx serves directly from
+   `/srv/treehouse/launcher/`.
    The backend is a FastAPI service in a container. Two deployable
    units, simple to reason about.
 

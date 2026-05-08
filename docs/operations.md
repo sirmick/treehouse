@@ -130,10 +130,11 @@ container as root (the bind-mounted `library.xml` is owned by the host
 `treehouse` user, so the unprivileged container user can't write
 otherwise), then `docker restart`s kiwix to pick up the new entry.
 
-The `wikipedia_en_for_schools.zim` build is no longer published; the
-`WIKIPEDIA_SEED_NAME` variable in the Makefile points at the closest
-substitute. Bump the date as new builds land at
-<https://download.kiwix.org/zim/wikipedia/>.
+The catalog name comes from `manifest.yml` (zims[0]); the version
+date is in the Makefile (`WIKIPEDIA_SEED_DATE`). The
+`wikipedia_en_for_schools.zim` build is no longer published; the
+default `wikipedia_en_100_maxi` is the closest small substitute. Bump
+the date as new builds land at <https://download.kiwix.org/zim/wikipedia/>.
 
 ### 6. Health checks
 
@@ -247,7 +248,7 @@ with intact data.**
 make restore-drill SNAPSHOT=latest
 
 # This:
-#   1. Spins up a clean Vagrant VM
+#   1. Spins up a clean libvirt VM (via bin/up.sh)
 #   2. Runs Ansible to install services
 #   3. restic restore /srv/treehouse/state/ from the chosen snapshot
 #   4. Brings up Compose
@@ -434,7 +435,7 @@ a reset. The recovery is per-service:
 | Kid wrote inappropriate content in a Matrix room | admin redacts the message via Synapse admin API; logs reviewed |
 | Kid changed their PIN to lock themselves out | edit `kids.yml`, re-provision |
 | Kid uploaded weird content to PeerTube | admin deletes via PeerTube admin UI |
-| Kid found a Caddy admin path | check Caddy config — should not have been exposed; tighten |
+| Kid found an nginx admin path | check the proxy site config — should not have been exposed; tighten |
 
 A general-purpose nuke option for a single kid: `make nuke-kid
 KID=alice`. This:

@@ -15,14 +15,16 @@ plumbing in place, ready for content services to drop into.
 
 **Deliverables:**
 
-- `Vagrantfile` (libvirt or VirtualBox) provisioning two VMs:
-  - The treehouse box: Debian 12, two virtual disks (~40 GB system, ~1 TB content).
-  - A test-client VM: small Alpine, attached only to the kids' bridge.
-    Stand-in for a tablet, and the host from which isolation probes run.
+- `bin/up.sh` (libvirt + virt-install + cloud-init) provisioning the
+  treehouse box: Debian 12, two virtual disks (~40 GB system, ~200 GB
+  content). `make up` is the entry point; `make down` cleans up.
+- A throwaway "tablet" VM (single NIC on br-kids, no mgmt path) spun
+  up on demand by `bin/verify-isolation-via-tablet.sh` to act as a
+  real device on the kids' segment for isolation probes.
 - `ansible/site.yml` with `base` and `network` roles:
   - apt baseline, ufw/nftables, ssh hardening
   - dnsmasq installed, configured to wildcard `.kids` to host IP
-  - Caddy installed with a single placeholder vhost
+  - nginx installed with the per-vhost site config
   - Docker engine installed
   - Storage layout `/srv/treehouse/{config,state,content,launcher,logs}`
     created with correct ownership.
@@ -31,22 +33,23 @@ plumbing in place, ready for content services to drop into.
   to keep the file format stable before anything binds to it.
 - `backup` Ansible role: restic installed, repository initialized,
   systemd timer scheduled. One manual snapshot taken to prove the path.
-- `bin/verify-isolation` (driven by `make verify-isolation`) running
-  probes from the test-client VM: no default route, no DNS resolution
-  for non-`.kids` names, no TCP reachability to public IPs.
-- `make up` brings the box from zero to bootable; `make destroy` cleans up.
+- `bin/verify-isolation` (driven by `make verify-isolation` via the
+  tablet-VM wrapper) running probes from a throwaway guest: no
+  default route, no DNS resolution for non-`.kids` names, no TCP
+  reachability to public IPs.
+- `make up` brings the box from zero to bootable; `make down` cleans up.
 
 **Exit criteria:**
 
-- `vagrant up` completes without error for both VMs.
-- The test-client VM gets a DHCP lease from the box's dnsmasq.
-- `curl http://hello.kids` from the test-client VM hits Caddy's placeholder.
+- `make up` completes without error.
+- The tablet probe VM gets a DHCP lease from the box's dnsmasq.
+- `curl -H 'Host: home.kids' http://10.10.10.1/` from inside the VM
+  hits the nginx placeholder.
 - `ip route` on the box has no default route to the public internet
   (or the route exists only on a separate management interface).
 - `make verify-isolation` exits 0.
-- `restic restore` to a fresh third VM completes and brings up a working
-  copy of the box. Proves backup works *before* there's anything
-  precious to back up.
+- `make restore-drill` completes the backup → restore round-trip.
+  Proves backup works *before* there's anything precious to back up.
 - Re-running `ansible-playbook site.yml` against a healthy box is a no-op.
 
 ## Phase 1 — Single-service MVP (Kiwix)
@@ -57,12 +60,13 @@ offline.
 
 **Deliverables:**
 
-- `compose.yml` with `kiwix` and a `caddy-config` entry pointing
-  `wikipedia.kids` → `kiwix:8080`.
-- A "Wikipedia for Schools" ZIM (5 GB) downloaded manually into
-  `content/zims/` — no updater yet.
-- Caddy serves `home.kids` from a static placeholder page with a single
-  link to `wikipedia.kids`.
+- `compose.yml` with `kiwix` and an nginx proxy that routes
+  `wikipedia.kids` → kiwix on the docker network.
+- A small Wikipedia ZIM (~50 MB `wikipedia_en_100_maxi`) downloaded
+  manually into `content/zims/` via `make seed-wikipedia` — no
+  updater yet.
+- nginx serves `home.kids` from a SvelteKit static build (tile grid
+  with one working Wikipedia tile, the rest marked "soon").
 
 **Exit criteria:**
 
@@ -96,7 +100,7 @@ broker generalizes beyond one backend.
 - `kids.yml` declarative spec, with one kid for testing.
 - `provisioner` script that reads `kids.yml` and calls
   `users_ensure` on every adapter.
-- Caddy rule: any request to a service vhost without a `kidsession`
+- nginx rule: any request to a service vhost without a `kidsession`
   cookie is redirected to `home.kids/launch?to=<service>`.
 - Test stack: Vitest for launcher components, Playwright for end-to-end
   ("Alice picks tile → enters PIN → lands authenticated in Kolibri").
@@ -145,7 +149,7 @@ Calibre-web (ebooks), OSM tile server (maps).
 
 **Deliverables:**
 
-- Compose entries and Caddy vhosts for each.
+- Compose entries and nginx vhosts for each.
 - Adapters:
   - `sugarizer` (its own user model, tokens stored in launcher)
   - `calibre-web` (HTTP basic via launcher-injected header)

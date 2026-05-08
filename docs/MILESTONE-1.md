@@ -4,8 +4,8 @@ The first runnable slice of Treehouse, with two distinct paths:
 
 | Path | What runs | When | Speed |
 |---|---|---|---|
-| **Daily dev (compose)** | caddy + kiwix in containers on your laptop | Every code change | seconds |
-| **VM gate (libvirt)** | full host stack: dnsmasq + nftables + caddy + docker | Commit checkpoints | minutes |
+| **Daily dev (compose)** | nginx + kiwix in containers on your laptop | Every code change | seconds |
+| **VM gate (libvirt)** | full host stack: dnsmasq + nftables + nginx + docker | Commit checkpoints | minutes |
 
 The compose stack is the daily iteration surface. The VM is for the
 real isolation gate — the property that "a device on the kids'
@@ -45,11 +45,12 @@ make test-deps        # creates .venv and installs requirements
 ## 1. Daily dev: compose stack on the laptop
 
 ```sh
-make dev-up           # caddy + kiwix in containers, ~5 sec
+make dev-up           # nginx + kiwix in containers, ~5 sec
 ```
 
-What's running: `treehouse-caddy` on `127.0.0.1:18080`, reverse-proxying
-`treehouse-kiwix` on a private compose network. To browse:
+What's running: `treehouse-proxy` (nginx) on `127.0.0.1:18080`,
+reverse-proxying `treehouse-kiwix` on a private compose network. To
+browse:
 
 ```sh
 curl -H 'Host: home.kids' http://127.0.0.1:18080/
@@ -77,35 +78,41 @@ make test-all         # everything
 The compose tests bring up `compose.test.yml` (port 18181, scoped to
 `treehouse-test` so it doesn't collide with `make dev-up`), assert
 through requests, tear down. Same fixture infrastructure for
-schemas, adapters, kiwix, and Caddy host-routing.
+schemas, adapters, kiwix, and nginx host-routing.
 
 ## 3. The VM gate
 
 When you want to validate the host-level architecture (dnsmasq
-sinkhole, nftables forward-drop, Caddy on the host, the restic
-backup, **real network isolation**):
+sinkhole, nftables forward-drop, host nginx, the restic backup,
+**real network isolation**):
 
 ```sh
 make up               # ~5 min: virt-install + cloud-init + cloud image fetch
-make provision        # ansible-playbook brings up dnsmasq, Caddy, Docker, kiwix
-make seed-wikipedia   # downloads Wikipedia for Schools (~5 GB) into the VM
-make verify-isolation # the actual milestone gate
-make restore-drill    # second milestone gate: backup actually works
+make provision        # ansible-playbook brings up dnsmasq, nginx, Docker, kiwix
+make seed-wikipedia   # fetches the manifest.yml zims[0] (~50 MB top-100) into the VM
+make verify-isolation # the actual milestone gate (network.mode: isolated only)
+make restore-drill    # second milestone gate: backup → restore round-trip
 make test-live        # pytest against the VM at 10.10.10.1
 ```
 
 What `make verify-isolation` does:
 
-1. SSHes into the treehouse VM
-2. Creates a `tablet` network namespace inside the VM
-3. Attaches a macvlan child of `eth1` (the kids' segment NIC) to the namespace
-4. The namespace gets DHCP from the VM's dnsmasq → no upstream route
-5. Runs probes (1.1.1.1 unreachable, DNS sinkhole works, `home.kids`
-   reachable) inside the namespace
-6. Cleans up the namespace
+1. Spins up a throwaway "tablet" VM with a single NIC on `br-kids`
+   (no management path, no SSH). It's a real guest, not a netns —
+   exercises the segment exactly the way a kid's tablet would.
+2. cloud-init drops `bin/verify-isolation` into the tablet at first
+   boot, runs it, and writes the output to a file-backed serial.
+3. Probes inside the tablet: no default route, `home.kids` resolves
+   to 10.10.10.1, `youtube.com` is sinkholed, 1.1.1.1:53/80/443
+   unreachable, HTTP 200 from the launcher and Wikipedia vhosts.
+4. Host-side wrapper polls the serial for a sentinel, prints results
+   to your terminal, destroys the tablet VM. Console log preserved
+   at `/var/lib/libvirt/images/treehouse/treehouse-tablet-console.log`.
 
-This simulates a tablet plugged into the kids' WiFi: same network,
-no other path.
+The tablet only exists in `network.mode: isolated`. In `lan` mode
+(see `treehouse.yml`) the gate is moot and the target refuses with a
+clear message — the VM is on the LAN by design and the property
+"can't reach upstream" no longer applies.
 
 ## 4. Tear down
 

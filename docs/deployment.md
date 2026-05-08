@@ -1,6 +1,6 @@
 # Deployment
 
-How Treehouse is built and run, from `vagrant up` on a developer laptop
+How Treehouse is built and run, from `make up` on a developer laptop
 through to the Raspberry Pi that lives on the shelf in the family room.
 
 The same Ansible roles and Compose stack target both. The only differences
@@ -12,7 +12,7 @@ service configuration.
 
 | Target | Purpose | Hardware | When |
 |---|---|---|---|
-| `vagrant` | Iteration, CI, tests | libvirt or VirtualBox VM | All development |
+| libvirt VM | Iteration, CI, tests | KVM via virt-install on a Linux laptop | All development |
 | `pi` | Production family deployment | Raspberry Pi 5 + NVMe | After Phase 9 |
 | `cloud` | Not supported | — | Explicitly out of scope |
 
@@ -24,96 +24,83 @@ See `architecture.md` for the reasoning.
 
 ```
 treehouse/
-├── Vagrantfile                     # libvirt by default, VBox fallback
-├── Makefile                        # up / destroy / provision / test / deploy
+├── bin/                            # shell entry points
+│   ├── up.sh                       # libvirt + virt-install + cloud-init
+│   ├── down.sh                     # tear down the VM
+│   ├── verify-isolation            # the probe that runs inside the tablet VM
+│   ├── verify-isolation-via-tablet.sh   # host-side wrapper
+│   ├── test-live.sh                # pytest against the deployed VM
+│   ├── launcher-config-gen         # writes launcher/src/lib/config.ts from yaml
+│   └── cfg                         # tiny YAML reader for shell consumers
+├── Makefile                        # all targets (see docs/commands.md)
+├── treehouse.yml                   # per-deployment infra (network mode, hostnames)
+├── manifest.yml                    # content (declarative; Phase-3 updater target)
+├── kids.yml                        # kids (declarative; planned, schema in schemas/)
 ├── compose.yml                     # all containers
 ├── compose.test.yml                # smaller content, deterministic fixtures
+├── nginx/
+│   └── nginx.conf                  # mounted into the compose proxy container
+├── launcher/                       # SvelteKit + Tailwind frontend
+│   ├── src/                        # svelte components, types
+│   └── build/                      # produced by `make launcher-build`
 ├── ansible/
-│   ├── site.yml                    # top-level playbook
-│   ├── inventory/
-│   │   ├── vagrant
-│   │   └── pi
+│   ├── site.yml                    # top-level playbook (loads ../treehouse.yml)
+│   ├── inventory/                  # written per-host by bin/up.sh
 │   ├── group_vars/
-│   │   ├── all.yml
-│   │   ├── vagrant.yml
-│   │   └── pi.yml
+│   │   └── all.yml                 # derives legacy flat names from treehouse.yml
 │   ├── roles/
-│   │   ├── base/                   # apt baseline, ssh, ufw
-│   │   ├── network/                # dnsmasq, nftables, bridge
-│   │   ├── proxy/                  # Caddy + per-service vhosts
+│   │   ├── base/                   # apt baseline, ssh
+│   │   ├── network/                # dnsmasq (isolated mode), nftables, kids iface
+│   │   ├── proxy/                  # host nginx + per-service vhosts (j2 template)
 │   │   ├── docker/                 # docker-ce + compose plugin
-│   │   ├── treehouse-services/     # renders compose.yml, starts stack
-│   │   ├── content-bootstrap/      # first-run ZIM seed (optional)
+│   │   ├── treehouse-services/     # copies compose.yml + nginx tree, starts stack
 │   │   └── backup/                 # restic config + systemd timer
 │   └── files/
-│       └── caddy/Caddyfile.j2
-├── treehouse/                      # Treehouse's own services
-│   ├── launcher/                   # SvelteKit + FastAPI broker
-│   ├── searchd/                    # FastAPI aggregator
-│   ├── aigateway/                  # FastAPI in front of Ollama
-│   ├── updater/                    # CLI: content sync
-│   ├── provisioner/                # CLI: kid account sync
-│   └── adapters/                   # shared adapter modules
-├── packer/
-│   ├── kids.pkr.hcl                # bake .qcow2 / .ova / Pi image
-│   └── pi-gen.cfg                  # Pi-specific image config
-├── manifest.yml                    # content (declarative)
-├── kids.yml                        # kids (declarative)
+│       └── br-kids.xml             # libvirt isolated network definition
+├── treehouse/                      # Treehouse's own services (Phase 2+)
+│   ├── adapters/                   # shared adapter modules (kiwix exists)
+│   └── provisioner/                # CLI: kid account sync (planned)
+├── schemas/                        # pydantic schemas for manifest.yml and kids.yml
 ├── docs/                           # design docs (this directory)
-└── tests/
-    ├── e2e/                        # Playwright
-    ├── integration/                # pytest, hits real compose stack
-    └── fixtures/
-        ├── manifest.test.yml
-        ├── kids.test.yml
-        └── seed-zims/
+└── tests/                          # pytest: schemas, compose, live, etc.
 ```
 
 The `treehouse/` Python packages and the SvelteKit launcher live in the
 same repo so refactors that span the broker contract and the UI happen as
 single PRs. Mono-repo for simplicity; not a polyglot zoo.
 
-## Vagrant — the default development target
+## libvirt + virt-install — the default development target
 
-```ruby
-# Vagrantfile (sketch)
-Vagrant.configure("2") do |config|
-  config.vm.box = "debian/bookworm64"
-  config.vm.hostname = "treehouse"
+`bin/up.sh` is the entry point (driven by `make up`). It uses
+libvirt directly via `virt-install` and a cloud-init NoCloud seed —
+no Vagrant dependency.
 
-  # Two networks:
-  #   - management: NAT (lets vagrant ssh in, lets ansible apt-install)
-  #   - kids: private bridge ("br-kids"), no upstream
-  config.vm.network "private_network",
-    libvirt__network_name: "br-kids",
-    libvirt__forward_mode: "none",
-    auto_config: false
+What it sets up:
 
-  config.vm.provider "libvirt" do |v|
-    v.memory = 8192
-    v.cpus = 4
-    v.storage :file, size: "1000G", type: "qcow2"
-  end
+- Debian 12 generic-cloud image, cached at
+  `/var/lib/libvirt/images/treehouse/debian-12-genericcloud-amd64.qcow2`.
+- 40 GB system disk + 200 GB sparse content disk (qcow2 overlays).
+- Two NICs:
+  - **Management:** libvirt's `default` NAT network. Auto-DHCP'd to
+    `192.168.122.x`. This is how the laptop reaches the VM via SSH +
+    Ansible.
+  - **Kids segment:** depends on `network.mode` in `treehouse.yml`:
+    - `isolated` (the default) — libvirt's `br-kids` network, an
+      isolated bridge with no upstream and no NAT. The VM's dnsmasq
+      serves DHCP/DNS on `10.10.10.0/24`.
+    - `lan` — macvtap-bridged onto the host's LAN NIC. The VM gets
+      a static IP on the LAN; LAN devices reach it directly. dnsmasq
+      is disabled in this mode.
+- Cloud-init seeds the SSH key (auto-detected from `~/.ssh/`) so the
+  laptop can `ssh mick@<vm>` without a password.
 
-  config.vm.synced_folder ".", "/vagrant", type: "rsync"
-
-  config.vm.provision "ansible" do |a|
-    a.playbook = "ansible/site.yml"
-    a.inventory_path = "ansible/inventory/vagrant"
-  end
-end
-```
-
-Two networks: a NAT'd management interface that lets `vagrant ssh` work
-and lets Ansible reach apt mirrors during initial provisioning, and a
-private bridge `br-kids` that the kids' AP also connects to. The host
-has a default route only via the management interface; the kids' bridge
-explicitly does not. Once provisioned, the management interface can be
-brought down for production runs (`make seal` flips it off).
+`bin/up.sh` is idempotent: re-running with the VM already defined is a
+no-op. `bin/down.sh` (`make down`) destroys the VM and the per-VM
+overlay disks. The base image is preserved for the next `make up`.
 
 ## Development DNS
 
-The architecture rests on Caddy doing host-header routing —
+The architecture rests on nginx doing host-header routing —
 `wikipedia.kids`, `khan.kids`, `home.kids`, all on port 80. Falling
 back to `localhost:8080`-style URLs in dev is rejected: the broker's
 cookie scoping, redirect rules, and unbypassable bounce all depend
@@ -139,34 +126,28 @@ This requires an L2 path from the laptop to 10.10.10.1, which
 libvirt's `private_network` provides automatically via the `virbr*`
 interface created on the host.
 
-### Test-client VM as the validation surface
+### Tablet VM as the validation surface
 
 The laptop is the wrong place to test "the kids segment cannot reach
 the internet" — the laptop has its own internet, and even with the
 per-domain resolver its routing table still has a default route. A
-small companion VM lives in the Vagrantfile, attached only to the
-kids' bridge:
+host-side netns sharing the host kernel is also too weak: routing
+tables, conntrack, and fwmarks all leak from the host's view.
 
-```ruby
-config.vm.define "client" do |c|
-  c.vm.box = "generic/alpine318"
-  c.vm.network "private_network",
-    libvirt__network_name: "br-kids",
-    libvirt__forward_mode: "none",
-    auto_config: false
-  c.vm.provider "libvirt" do |v|
-    v.memory = 256
-    v.cpus = 1
-  end
-end
-```
+`bin/verify-isolation-via-tablet.sh` (driven by `make verify-isolation`)
+spins up a throwaway "tablet" VM on demand: single NIC on `br-kids`,
+no management interface, no SSH. cloud-init drops `bin/verify-isolation`
+into the guest, runs it on first boot, and writes the output to a
+file-backed serial. The host wrapper polls the serial for a sentinel,
+prints results, and destroys the VM. Console log preserved at
+`/var/lib/libvirt/images/treehouse/treehouse-tablet-console.log` for
+forensics on failure.
 
 Its DHCP comes from the box's dnsmasq. Its routing table has no
-default route. It's the closest dev-time approximation of a tablet.
-`make verify-isolation` runs probes from inside this VM — direct-IP
-`curl` to public addresses, DNS lookups for non-`.kids` names,
-default-route check. It is the gate, not a script run on the
-developer's laptop.
+default route. It is the closest dev-time approximation of a tablet
+on the kids' WiFi — and it's the gate, not a script run on the
+developer's laptop. The gate is meaningful only in
+`network.mode: isolated`; `lan` mode skips it with a clear message.
 
 ### Quick shell checks
 
@@ -205,14 +186,16 @@ rather than encoding it in YAML.
 
 ### `proxy`
 
-- Caddy install (system package or static binary)
-- `Caddyfile` rendered from a Jinja template that knows the service set
-  - per-service vhost (`wikipedia.kids`, `khan.kids`, ...)
+- nginx install (system apt package)
+- `treehouse.conf` rendered from a Jinja template that knows the service set
+  - per-service vhost (`wikipedia.kids`, `khan.kids`, ...) plus the
+    public-name aliases from `treehouse.yml` `hostnames:` table
   - broker-redirect rule (no `kidsession` → bounce to launcher)
-  - admin vhost (`admin.kids`) with HTTP basic
-- Internal CA: optional; off by default (HTTP-only on the kids segment).
-  When on, Caddy issues from its own CA and a one-shot script bundles the
-  root cert for installation on devices.
+  - admin vhost (`admin.kids`) with HTTP basic via `htpasswd`
+- TLS termination is upstream (a separate reverse-proxy box at the
+  household edge), not on the box itself. Inside the kids' segment
+  it's HTTP only. If you want a self-signed CA in the future, that's
+  a future addition; M1 deliberately doesn't ship one.
 
 ### `docker`
 
@@ -263,7 +246,8 @@ Conventions:
 - Per-service log size cap (`logging.options.max-size: 10m`,
   `max-file: 3`).
 - A single private network `treehouse-net` for inter-service traffic;
-  Caddy is the only thing exposed on the host network.
+  the compose proxy (nginx) is the only thing exposed on the host
+  network. The host nginx forwards to it on `127.0.0.1:18080`.
 
 A representative excerpt:
 
@@ -301,7 +285,7 @@ detail in `architecture.md`; recapped here for completeness.
 /srv/treehouse/
 ├── config/                   # in git, ~MB
 │   ├── compose.yml           (rendered)
-│   ├── caddy/Caddyfile       (rendered)
+│   ├── nginx.conf            (mounted into compose proxy)
 │   ├── dnsmasq/kids.conf
 │   ├── nftables/kids.nft
 │   └── per-service/...
@@ -336,7 +320,7 @@ the manifest, typically 500 GB–2 TB.
 
 ## Sizing
 
-| Resource | Vagrant dev | Pi production |
+| Resource | libvirt VM dev | Pi production |
 |---|---|---|
 | CPU | 4 vCPU | Pi 5 (4 cores) |
 | RAM | 8 GB | 8 GB (Pi 5 max) |
@@ -388,8 +372,8 @@ The migration runbook (in `docs/operations.md`) is:
 ## What the Makefile gives you
 
 ```
-make up              # vagrant up + ansible provision
-make destroy         # tear down, keep content/
+make up              # libvirt VM up + cloud-init seed
+make down            # tear down the VM (base image kept for next up)
 make provision       # rerun ansible against existing VM
 make seal            # disable management interface (production-only)
 make unseal          # re-enable management interface (maintenance)

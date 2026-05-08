@@ -35,6 +35,14 @@ management.
 A single YAML file at the repo root. Mick edits it; the updater
 reconciles to it.
 
+> **Status (M1):** the file exists at `manifest.yml` and is
+> schema-validated by `make test-schemas`. The Phase-3 updater isn't
+> built yet; today the only consumer is `make seed-wikipedia`, which
+> reads `zims[0].name` and pairs it with a hardcoded `WIKIPEDIA_SEED_DATE`
+> in the Makefile to fetch a single ZIM. Adding more entries here
+> right now means they don't get fetched yet — but the file is
+> already in the right shape for when the updater lands.
+
 ```yaml
 zims:
   # source: library.kiwix.org. Always pulls newest published version.

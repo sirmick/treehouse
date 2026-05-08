@@ -50,7 +50,7 @@ A box (VM today, Raspberry Pi later) running:
                                    ▼
               ┌──────────────────────────────────────────────┐
               │  Host (Debian VM, later RPi 5):              │
-              │   dnsmasq · Caddy · nftables · Docker        │
+              │   dnsmasq · nginx · nftables · Docker        │
               │                                              │
               │   Containers:                                │
               │    kiwix · kolibri · sugarizer · peertube    │
@@ -79,7 +79,7 @@ manifest, so it isn't backed up — just re-fetched.
 
 Vaulted SSO, not federated. The launcher is the identity authority. Each
 kid picks an avatar, optionally enters a PIN, and the launcher mints session
-tokens for each backend on their behalf using stored admin credentials. Caddy
+tokens for each backend on their behalf using stored admin credentials. nginx
 ensures direct service access (`khan.kids/...`) without a `kidsession` cookie
 gets bounced through the launcher first, so the broker is unbypassable.
 

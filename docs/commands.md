@@ -40,10 +40,10 @@ on the kids' segment cannot reach the internet.
 
 | Target | What it does | When to run |
 |---|---|---|
-| `make verify-isolation` | scp's `bin/verify-isolation` into the VM, runs `bin/run-isolation-via-netns.sh` over ssh as root: creates a `tablet` netns with macvlan from `eth1`, runs DHCP inside it, executes the probe script there, returns its exit code | Milestone 1 close-out — the actual gate |
+| `make verify-isolation` | spins a throwaway "tablet" VM with a single NIC on `br-kids` (via `bin/verify-isolation-via-tablet.sh`), cloud-init runs `bin/verify-isolation` inside it, output captured via file-backed serial, VM destroyed on exit. `network.mode: isolated` only — refuses in `lan` mode. | Milestone 1 close-out — the actual gate |
 
 The probe script asserts:
-- No default route in the namespace
+- No default route on the tablet
 - `home.kids` resolves to 10.10.10.1
 - Unknown hostnames sinkhole to 10.10.10.1
 - TCP to `1.1.1.1:53/80/443` is unreachable
@@ -55,7 +55,7 @@ Until Phase 3's updater lands, ZIM placement is manual.
 
 | Target | What it does | When to run |
 |---|---|---|
-| `make seed-wikipedia` | ssh's into the VM, `curl`s `wikipedia_en_for_schools.zim` (~5 GB) into `/srv/treehouse/content/zims/`, calls `kiwix-manage` to add it to the library, sends `SIGHUP` to the kiwix container so it re-reads | Once after `make provision`, until Phase 3's updater replaces it |
+| `make seed-wikipedia` | reads the catalog name from `manifest.yml` (zims[0]), pairs it with `WIKIPEDIA_SEED_DATE` in the Makefile, ssh's into the VM, curls the ZIM (~50 MB for `wikipedia_en_100_maxi`) into `/srv/treehouse/content/zims/`, calls `kiwix-manage add`, then `docker restart`s kiwix to pick it up | Once after `make provision`, until Phase 3's updater replaces it |
 
 ## Backup
 

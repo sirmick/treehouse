@@ -307,19 +307,31 @@ Kid taps "Khan Academy"
 The redirect is the entire login flow. The kid never sees a Kolibri
 login screen.
 
-## The Caddy redirect — closing the bypass
+## The nginx redirect — closing the bypass
 
 A kid with a stored bookmark to `khan.kids` would skip the launcher
-entirely and see Kolibri's native login. To prevent this, Caddy
-redirects any service-host request lacking `kidsession` back through
-the launcher:
+entirely and see Kolibri's native login. To prevent this, the host
+nginx redirects any service-host request lacking `kidsession` back
+through the launcher:
 
-```caddyfile
-@no_session not header_regexp Cookie kidsession=
+```nginx
+map $http_cookie $has_session {
+    default                  0;
+    "~*kidsession="          1;
+}
 
-khan.kids, play.kids, books.kids, videos.kids, chat.kids {
-    redir @no_session https://home.kids/launch?to={host} 302
-    reverse_proxy <backend>:<port>
+server {
+    listen 10.10.10.1:80;
+    server_name khan.kids play.kids books.kids videos.kids chat.kids;
+
+    if ($has_session = 0) {
+        return 302 http://home.kids/launch?to=$host;
+    }
+
+    location / {
+        proxy_pass http://<backend>:<port>;
+        proxy_set_header Host $host;
+    }
 }
 ```
 
@@ -362,8 +374,9 @@ videos") is a launcher feature, not a multi-service rollout.
 
 ## Admin identity
 
-A separate path: `admin.kids` runs through Caddy with HTTP Basic
-auth, gated by Mick's password (stored hashed in Caddy's config).
+A separate path: `admin.kids` runs through nginx with HTTP Basic
+auth, gated by Mick's password (stored hashed via `htpasswd` in
+`/etc/nginx/htpasswd-admin`).
 Mick's identity is not in `kids.yml` — it's a different layer entirely.
 
 The admin pages let Mick:
@@ -389,7 +402,7 @@ Optionally encrypted with `sops` so it can be committed to git;
 otherwise generated fresh per deploy and snapshotted via restic.
 
 The provisioner only ever runs on-box, talking to localhost. No
-admin endpoints are exposed externally — Caddy 403s on
+admin endpoints are exposed externally — nginx 403s on
 `/_synapse/admin/*`, `/api/v1/users` POSTs, etc. unless the request
 originates from the launcher's container or localhost.
 

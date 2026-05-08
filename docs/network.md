@@ -165,9 +165,9 @@ no-poll
 The `address=/#/10.10.10.1` line is the most important non-obvious bit:
 **any DNS query that doesn't match `.kids` resolves to the host's IP**.
 This means a kid typing `youtube.com` doesn't get a 30-second timeout
-or a confusing "connection refused" — they get Caddy's "Hmm, that's not
-something we have" page. (Caddy's default vhost handles this; see the
-`proxy` role.)
+or a confusing "connection refused" — they get nginx's "Not at home"
+landing page. (The `default_server` block in the proxy role handles
+this; see `ansible/roles/proxy/templates/treehouse.conf.j2`.)
 
 ## DNS — split between served names and sinkhole
 
@@ -176,11 +176,11 @@ Two response classes:
 - **Real services**: `home.kids`, `wikipedia.kids`, `khan.kids`,
   `videos.kids`, `chat.kids`, `books.kids`, `maps.kids`,
   `play.kids`, `admin.kids`, etc. These all resolve to `10.10.10.1`
-  via the wildcard. Caddy distinguishes them by Host header and routes
+  via the wildcard. nginx distinguishes them by Host header and routes
   to the right backend.
 - **Everything else** (`youtube.com`, `tiktok.com`, anything): resolves
-  to `10.10.10.1` via the sinkhole. Caddy's default vhost serves a
-  friendly redirect page:
+  to `10.10.10.1` via the sinkhole. nginx's `default_server` vhost
+  serves a friendly redirect page:
 
   > That's not something we have at home. Try:
   > 🏠 home.kids — your home page
@@ -203,7 +203,7 @@ table inet kids {
     chain forward {
         type filter hook forward priority 0; policy drop;
 
-        # Allow kids segment ↔ host services (already DNAT'd by Caddy)
+        # Allow kids segment ↔ host services (proxied by nginx)
         iifname "br-kids" oifname "br-kids" accept
 
         # Explicitly drop kids → anywhere else
@@ -240,55 +240,69 @@ The host has its own outbound access (when management is up) for
 package updates and content downloads. The drop rule only applies to
 *forwarding*, not to the host's own outbound.
 
-## Caddy — the single user-facing port
+## nginx — the single user-facing port
 
-All inbound from the kids' segment is intermediated by Caddy. Per-vhost
-routing fans out to backends; a default vhost catches sinkholed requests.
+All inbound from the kids' segment is intermediated by the host
+nginx. Per-vhost routing fans out to backends; a `default_server`
+vhost catches sinkholed requests.
 
-```caddyfile
-{
-    # No automatic HTTPS — internal-only, plain HTTP avoids cert warnings.
-    auto_https off
-}
-
-# Friendly landing for any unknown hostname (sinkholed by dnsmasq)
-:80 {
-    handle {
-        respond "That's not something we have at home." 404
-        # Or render a static template with helpful suggestions.
+```nginx
+# Friendly landing for any unknown Host header (sinkholed by dnsmasq).
+server {
+    listen 10.10.10.1:80 default_server;
+    server_name _;
+    root /srv/treehouse/launcher;
+    location / {
+        try_files /sinkhole.html =404;
     }
 }
 
-home.kids, kids {
-    root * /srv/treehouse/launcher
-    file_server
-    reverse_proxy /api/* launcher:8000
+# home.kids — static launcher (SvelteKit build, served as files).
+server {
+    listen 10.10.10.1:80;
+    server_name home.kids hello.kids;
+    root /srv/treehouse/launcher;
+    index index.html;
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+    location /api/ {
+        proxy_pass http://launcher:8000;
+    }
 }
 
-wikipedia.kids { reverse_proxy kiwix:8080 }
-khan.kids      { reverse_proxy kolibri:8080 }
-play.kids      { reverse_proxy sugarizer:8089 }
-books.kids     { reverse_proxy calibre:8083 }
-videos.kids    { reverse_proxy peertube:9000 }
-maps.kids      { reverse_proxy tileserver:8080 }
-chat.kids      { reverse_proxy element:80 }
-
-# Service hosts redirect through launcher if no kidsession cookie:
-@no_session not header_regexp Cookie kidsession=
-khan.kids, play.kids, books.kids, videos.kids, chat.kids {
-    redir @no_session https://home.kids/launch?to={host} 302
+# Per-service vhosts. wikipedia.kids forwards through the compose
+# proxy (which routes by Host header to kiwix); future services
+# point at their own backends similarly.
+server {
+    listen 10.10.10.1:80;
+    server_name wikipedia.kids;
+    location / {
+        proxy_pass http://127.0.0.1:18080;
+        proxy_set_header Host $host;
+    }
 }
 
-admin.kids {
-    basicauth { mick $2a$14$... }
-    reverse_proxy launcher:8000/admin
+# Service hosts redirect through launcher if no kidsession cookie.
+# See identity.md for the full server block.
+# server { listen 10.10.10.1:80; server_name khan.kids ...; ... }
+
+# admin.kids — HTTP Basic auth gate via htpasswd.
+server {
+    listen 10.10.10.1:80;
+    server_name admin.kids;
+    auth_basic "admin";
+    auth_basic_user_file /etc/nginx/htpasswd-admin;
+    location / {
+        proxy_pass http://launcher:8000/admin;
+    }
 }
 ```
 
-The broker-redirect on `@no_session` is what makes vaulted SSO
-unbypassable: a kid (or curious tablet) hitting `khan.kids` directly
-gets bounced through the launcher first, and only ends up at Kolibri
-*with a Kolibri session cookie injected by the launcher*.
+The broker-redirect (see `identity.md`) is what makes vaulted SSO
+unbypassable: a kid hitting `khan.kids` directly gets bounced through
+the launcher first, and only ends up at Kolibri *with a Kolibri
+session cookie injected by the launcher*.
 
 ## NTP without internet
 

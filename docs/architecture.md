@@ -42,7 +42,7 @@ In rough priority order, the choices below were optimized for:
    │   On systemd:                                                │
    │     dnsmasq      DHCP + DNS authority for the segment        │
    │                  Wildcards *.kids → host IP                  │
-   │     Caddy        Reverse proxy, vhosts per service           │
+   │     nginx        Reverse proxy, vhosts per service           │
    │                  Brokers cookies/tokens through redirects    │
    │     nftables     Drop-all upstream rule (defense in depth)   │
    │     restic       Nightly backup of state/ to external disk   │
@@ -64,7 +64,7 @@ In rough priority order, the choices below were optimized for:
    │     └──────────────┴──────────────┴─────────────────┘        │
    │                                                              │
    │   /srv/treehouse/                                            │
-   │     config/   (in git: compose.yml, Caddyfile, dnsmasq, ...) │
+   │     config/   (in git: compose.yml, nginx.conf, dnsmasq, ...) │
    │     state/    (DB volumes, journals, credentials cache)      │
    │     content/  (ZIMs, videos, tiles, books — replaceable)     │
    │     launcher/ (built static assets)                          │
@@ -80,7 +80,7 @@ In rough priority order, the choices below were optimized for:
 The split is governed by two questions:
 
 - **Does it need host-level network privilege?** dnsmasq broadcasts DHCP
-  packets the segment must answer; Caddy binds privileged ports for the
+  packets the segment must answer; nginx binds privileged ports for the
   reverse proxy. Both are simpler on the host.
 - **Is it stateful infrastructure vs. application logic?** Plumbing on the
   host; everything else in containers.
@@ -90,7 +90,7 @@ The split is governed by two questions:
 | Service | Role |
 |---|---|
 | dnsmasq | DHCP + DNS authority for the kids' segment; wildcards `.kids` to host IP |
-| Caddy | Reverse proxy, per-vhost routing, broker-redirect rules, optional internal CA |
+| nginx | Reverse proxy, per-vhost routing, broker-redirect rules, optional internal CA |
 | nftables | Drop-all-upstream rule (the kids' segment has no default route, and this is belt + suspenders) |
 | docker engine | Container runtime |
 | chrony | Time sync (no upstream NTP — see operations.md) |
@@ -123,7 +123,7 @@ The split is governed by two questions:
 
 ```
 1. Kid opens browser → home.kids
-   └─► Caddy → launcher container
+   └─► nginx → launcher container
        └─► launcher renders avatar grid
 
 2. Kid taps "Alice" → enters PIN
@@ -135,7 +135,7 @@ The split is governed by two questions:
        ├─► looks up Alice's Kolibri credentials in credentials.sqlite
        ├─► POSTs Kolibri /api/auth/session/, captures sessionid cookie
        ├─► returns 302 to khan.kids with Set-Cookie for that session
-       └─► Caddy proxies → kolibri container
+       └─► nginx proxies → kolibri container
 
 4. Kid searches "volcanoes" in launcher
    └─► launcher → searchd /api/search?q=volcanoes&kid_id=alice
@@ -255,7 +255,7 @@ separately.)
 ## Where complexity is rejected
 
 - **The host configuration.** It should be small enough to read in one
-  sitting. dnsmasq + Caddy + nftables, not Kubernetes.
+  sitting. dnsmasq + nginx + nftables, not Kubernetes.
 - **Inter-service communication.** Containers talk over HTTP on a private
   Docker network. No message bus, no service mesh.
 - **Auth.** The vault is sqlite; the broker is a redirect. There is no
