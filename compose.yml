@@ -82,6 +82,8 @@ services:
     volumes:
       # State (indexes, snapshots, dumps). Backed up via restic
       # alongside the rest of /srv/treehouse/state/ on the VM.
+      # /srv/treehouse/state is a bind mount onto the persistent
+      # content disk, so the index survives `make down`.
       - ./state/meili:/meili_data
     environment:
       # Dev-mode: no master key required, public search endpoint.

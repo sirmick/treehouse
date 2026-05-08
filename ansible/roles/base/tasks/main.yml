@@ -81,10 +81,56 @@
     group: "{{ treehouse_group }}"
     mode: "0755"
 
+# ----- state on persistent disk (bind mount) -------------------------------
+# State (MeiliSearch index, restic repo, launcher sessions, future
+# postgres dbs, etc.) is "small + precious". Until today it lived on
+# the system disk and got wiped by `make down`. Now it lives on the
+# same persistent qcow2 as content — different subdirs of the disk,
+# bind-mounted at the legacy paths so compose volumes and ansible
+# templates don't have to know the underlying location changed.
+#
+#   /srv/treehouse/content/_state/  (real location, on persistent disk)
+#         ↓ bind mount
+#   /srv/treehouse/state/            (legacy path, what services use)
+#
+# Same fstab + mount in both isolated and lan modes. Off-box restic
+# target (NAS/laptop on lan, USB on isolated) is a separate slice.
+- name: Persistent state subdir on the content disk
+  ansible.builtin.file:
+    path: "{{ treehouse_root }}/content/_state"
+    state: directory
+    owner: "{{ treehouse_user }}"
+    group: "{{ treehouse_group }}"
+    mode: "0755"
+
+- name: State mountpoint (system-disk dir, will be shadowed by bind mount)
+  ansible.builtin.file:
+    path: "{{ treehouse_root }}/state"
+    state: directory
+    owner: "{{ treehouse_user }}"
+    group: "{{ treehouse_group }}"
+    mode: "0755"
+
+- name: Bind-mount state dir
+  ansible.posix.mount:
+    path: "{{ treehouse_root }}/state"
+    src: "{{ treehouse_root }}/content/_state"
+    fstype: none
+    opts: bind
+    state: mounted
+
+- name: State mountpoint ownership (after bind mount, on persistent fs)
+  ansible.builtin.file:
+    path: "{{ treehouse_root }}/state"
+    state: directory
+    owner: "{{ treehouse_user }}"
+    group: "{{ treehouse_group }}"
+    mode: "0755"
+
 # ----- remaining storage layout --------------------------------------------
-# /content is mounted above; everything else on the system disk. The
-# loop creates each path; subdirs of /content (zims, etc.) land on the
-# mounted disk.
+# Both /content and /state are mounted above; the loop just creates
+# subdirectories on top of those mounts (and any non-mounted paths
+# like /config and /logs on the system disk).
 - name: Storage directories
   ansible.builtin.file:
     path: "{{ item }}"
