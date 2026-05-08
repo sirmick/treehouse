@@ -15,10 +15,10 @@
 # 2. From inside the VM via qemu-ga — invoking pytest VM-side is a
 #    follow-up slice (needs pytest + requests installed there).
 #
-# 3. Through the public path — use the homezone alias from
-#    treehouse.yml (TREEHOUSE_HOST=<public-name>:443 with a small
-#    change to test_live.py to use https://). Slow because it goes
-#    out to the internet and back.
+# 3. Through the public path — set TREEHOUSE_HOST=<public-name>:443
+#    (the public hostname from treehouse.yml that your reverse proxy
+#    fronts the VM under) plus a small change to test_live.py to use
+#    https://. Slow because it goes out to the internet and back.
 
 set -euo pipefail
 
