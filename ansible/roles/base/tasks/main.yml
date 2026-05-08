@@ -35,6 +35,56 @@
     create_home: false
     state: present
 
+# ----- content disk ---------------------------------------------------------
+# bin/up.sh attaches the content qcow2 with serial=treehouse-content,
+# which Linux exposes as /dev/disk/by-id/virtio-treehouse-content.
+# We format it ext4 (idempotent — community.general.filesystem skips
+# if already formatted) and mount it at {{ treehouse_root }}/content
+# so ZIMs survive a `make down`/`make up` cycle.
+- name: Detect content disk by virtio serial
+  ansible.builtin.stat:
+    path: /dev/disk/by-id/virtio-treehouse-content
+  register: treehouse_content_dev
+
+- name: Ensure content disk is formatted ext4 (idempotent)
+  community.general.filesystem:
+    fstype: ext4
+    dev: /dev/disk/by-id/virtio-treehouse-content
+  when: treehouse_content_dev.stat.exists
+
+- name: Ensure content mountpoint exists
+  ansible.builtin.file:
+    path: "{{ treehouse_root }}/content"
+    state: directory
+    owner: "{{ treehouse_user }}"
+    group: "{{ treehouse_group }}"
+    mode: "0755"
+
+# Mount by /dev/disk/by-id path (stable across reboots via the
+# virt-install `serial=` option). Could use LABEL=, but ext4 label
+# strings are capped at 16 chars and "treehouse-content" is 17 —
+# truncation made LABEL= flaky. The by-id path has no length limit.
+- name: Mount content disk at {{ treehouse_root }}/content
+  ansible.posix.mount:
+    path: "{{ treehouse_root }}/content"
+    src: /dev/disk/by-id/virtio-treehouse-content
+    fstype: ext4
+    opts: defaults
+    state: mounted
+  when: treehouse_content_dev.stat.exists
+
+- name: Mountpoint ownership (after mount, top of the new fs)
+  ansible.builtin.file:
+    path: "{{ treehouse_root }}/content"
+    state: directory
+    owner: "{{ treehouse_user }}"
+    group: "{{ treehouse_group }}"
+    mode: "0755"
+
+# ----- remaining storage layout --------------------------------------------
+# /content is mounted above; everything else on the system disk. The
+# loop creates each path; subdirs of /content (zims, etc.) land on the
+# mounted disk.
 - name: Storage directories
   ansible.builtin.file:
     path: "{{ item }}"

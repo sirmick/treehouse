@@ -95,8 +95,15 @@ if ! virsh dominfo "$NAME" >/dev/null 2>&1; then
   qemu-img create -q -f qcow2 -F qcow2 -b "$BASE_IMAGE" "$SYSTEM_DISK"
   qemu-img resize -q "$SYSTEM_DISK" "${SYSTEM_DISK_GB}G"
 
-  log "creating $NAME content disk (${CONTENT_DISK_GB}G sparse)"
-  qemu-img create -q -f qcow2 "$CONTENT_DISK" "${CONTENT_DISK_GB}G"
+  if [[ -f "$CONTENT_DISK" ]]; then
+    # Content disk persists across `make down`/`make up` so ZIMs and
+    # other large content survive a system rebuild. To wipe it, run
+    # `make wipe-content` (or rm the qcow2 manually).
+    log "$NAME content disk exists — reusing (preserves ZIMs)"
+  else
+    log "creating $NAME content disk (${CONTENT_DISK_GB}G sparse)"
+    qemu-img create -q -f qcow2 "$CONTENT_DISK" "${CONTENT_DISK_GB}G"
+  fi
 fi
 
 # ----- cloud-init seed ------------------------------------------------------
@@ -164,7 +171,7 @@ else
     --vcpus "$VCPUS" \
     --osinfo debian12 \
     --disk path="$SYSTEM_DISK",bus=virtio \
-    --disk path="$CONTENT_DISK",bus=virtio \
+    --disk path="$CONTENT_DISK",bus=virtio,serial=treehouse-content \
     --disk path="$SEED_ISO",bus=virtio,readonly=on \
     --network network=default,model=virtio \
     --network ${SECOND_NIC_ARG} \
