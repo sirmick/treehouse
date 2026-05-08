@@ -157,8 +157,19 @@ def main() -> int:
         return 1
 
     archive = Archive(str(args.zim))
+    # Two distinct book identifiers:
+    #   book_name — ZIM's internal Name metadata (e.g. "wikipedia_en_simple_all").
+    #               Used for stable document IDs across re-ingest of newer
+    #               versions of the same ZIM (the metadata stays stable; the
+    #               filename's version suffix doesn't).
+    #   book_id   — kiwix-serve's per-book URL segment, which is the ZIM
+    #               filename without extension (e.g.
+    #               "wikipedia_en_simple_all_maxi_2026-02"). Used in
+    #               deeplink_book so search-result URLs route correctly.
     book_name = args.book_name or get_book_name(archive, args.zim.stem)
-    print(f"opening {args.zim} (book={book_name}, entries={archive.entry_count})", file=sys.stderr)
+    book_id = args.zim.stem
+    print(f"opening {args.zim} (name={book_name}, kiwix-id={book_id}, entries={archive.entry_count})",
+          file=sys.stderr)
 
     client = meilisearch.Client(args.meili_url, args.meili_key)
 
@@ -217,7 +228,7 @@ def main() -> int:
                 "snippet": chunk[:200],
                 "source": args.source,
                 "kind": args.kind,
-                "deeplink_book": book_name,
+                "deeplink_book": book_id,
                 "deeplink_path": path,
                 "language": "en",
                 "indexed_at": indexed_at,

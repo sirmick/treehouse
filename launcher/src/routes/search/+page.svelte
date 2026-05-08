@@ -11,12 +11,17 @@
 		deeplink_path?: string;
 	};
 
-	// Source → display label + emoji. All three are kiwix-served, so
-	// the URL builder is the same; the badge differs.
-	const SOURCE_BADGE: Record<string, { label: string; emoji: string }> = {
-		wikipedia: { label: 'Wikipedia', emoji: '📚' },
-		wiktionary: { label: 'Wiktionary', emoji: '📖' },
-		vikidia: { label: 'Vikidia', emoji: '🌱' }
+	// Source → display label + emoji + which kids hostname routes
+	// clicks for it. Each kiwix-served source has its own FQDN now,
+	// so search-result links land on the right "app" host instead
+	// of cross-host into the Wikipedia FQDN.
+	const SOURCE_META: Record<
+		string,
+		{ label: string; emoji: string; host: keyof typeof hostnames }
+	> = {
+		wikipedia: { label: 'Wikipedia', emoji: '📚', host: 'wikipedia' },
+		wiktionary: { label: 'Wiktionary', emoji: '📖', host: 'dictionary' },
+		vikidia: { label: 'Vikidia', emoji: '🌱', host: 'vikidia' }
 	};
 
 	let query = $state('');
@@ -26,19 +31,17 @@
 	let lastQuery = $state('');
 
 	function urlFor(hit: Hit): string {
-		// Every kiwix-served source (wikipedia / wiktionary / vikidia)
-		// is reachable through the wikipedia.kids vhost; kiwix routes
-		// by book name in the path. The vhost is named for the most
-		// prominent source — when other source kinds (kolibri, peertube)
-		// arrive they'll get their own activeHost() entries.
-		if (hit.deeplink_book && hit.deeplink_path) {
-			return `http://${activeHost('wikipedia')}/content/${hit.deeplink_book}/${hit.deeplink_path}`;
-		}
-		return '#';
+		// Each source routes through its own FQDN (wiki-kids,
+		// dictionary-kids, vikidia-kids). Sources we don't know fall
+		// back to the wikipedia FQDN as a best effort.
+		if (!hit.deeplink_book || !hit.deeplink_path) return '#';
+		const meta = SOURCE_META[hit.source];
+		const host = activeHost(meta?.host ?? 'wikipedia');
+		return `http://${host}/content/${hit.deeplink_book}/${hit.deeplink_path}`;
 	}
 
 	function badgeFor(source: string) {
-		return SOURCE_BADGE[source] ?? { label: source, emoji: '📄' };
+		return SOURCE_META[source] ?? { label: source, emoji: '📄' };
 	}
 
 	async function search(e: SubmitEvent) {
@@ -131,7 +134,7 @@
 			</ul>
 		{:else}
 			<p class="mt-4 text-center text-sm text-slate-400">
-				Search across the {Object.keys(hostnames).length} libraries on the box.
+				Search across the {Object.keys(SOURCE_META).length} libraries on the box.
 			</p>
 		{/if}
 	</div>
