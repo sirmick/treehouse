@@ -1,0 +1,90 @@
+---
+# Bootstrap the OSM basemap PMTiles file.
+#
+# 1. Install the protomaps go-pmtiles CLI (single static binary) onto
+#    the VM at /usr/local/bin/pmtiles.
+# 2. Use `pmtiles extract` to range-request a low-zoom subset of the
+#    daily Protomaps planet build into /srv/treehouse/content/maps/.
+#    This is internet-required (it reads from build.protomaps.com)
+#    but only on the install path; runtime is fully offline.
+# 3. Skip the extract if the target file already exists at the
+#    configured `basemap.build` version. Bump `basemap.build` in
+#    group_vars to force a refresh.
+#
+# Run via `make tiles`.
+
+- name: Bootstrap OSM basemap (PMTiles)
+  hosts: treehouse
+  become: true
+  gather_facts: true
+
+  vars_files:
+    - ../treehouse.yml
+
+  vars:
+    maps_dir: "{{ treehouse_root }}/content/maps"
+    pmtiles_cli_url: >-
+      https://github.com/protomaps/go-pmtiles/releases/download/v{{ basemap.pmtiles_cli }}/go-pmtiles_{{ basemap.pmtiles_cli }}_Linux_{{ 'x86_64' if ansible_architecture == 'x86_64' else 'arm64' }}.tar.gz
+    pmtiles_bin: "/usr/local/bin/pmtiles"
+    # Stamp so re-running with the same build is a no-op. Different
+    # builds produce different stamp files; the previous .pmtiles is
+    # left in place for atomic swap.
+    target_pmtiles: "{{ maps_dir }}/planet-{{ basemap.build }}-z{{ basemap.max_zoom }}.pmtiles"
+    current_link: "{{ maps_dir }}/planet.pmtiles"
+
+  tasks:
+    - name: Maps dir on persistent disk
+      ansible.builtin.file:
+        path: "{{ maps_dir }}"
+        state: directory
+        owner: "{{ treehouse_user }}"
+        group: "{{ treehouse_group }}"
+        mode: "0755"
+
+    - name: pmtiles CLI installed
+      ansible.builtin.unarchive:
+        src: "{{ pmtiles_cli_url }}"
+        dest: /usr/local/bin
+        remote_src: true
+        creates: "{{ pmtiles_bin }}"
+        extra_opts: ["--strip-components=0"]
+        include: ["pmtiles"]
+        mode: "0755"
+
+    - name: Stat current planet pmtiles for this build
+      ansible.builtin.stat:
+        path: "{{ target_pmtiles }}"
+      register: existing
+
+    - name: Extract planet PMTiles ({{ basemap.build }}, z0-z{{ basemap.max_zoom }})
+      ansible.builtin.command:
+        cmd: >-
+          {{ pmtiles_bin }} extract
+          https://build.protomaps.com/{{ basemap.build }}.pmtiles
+          {{ target_pmtiles }}
+          --maxzoom={{ basemap.max_zoom }}
+      when: not existing.stat.exists
+      changed_when: true
+      # Slow: range-reads several GB from the public build, writes
+      # ~1 GB out. Allow plenty of headroom.
+      async: 7200
+      poll: 30
+
+    - name: Symlink planet.pmtiles → current build
+      ansible.builtin.file:
+        src: "{{ target_pmtiles | basename }}"
+        dest: "{{ current_link }}"
+        state: link
+        force: true
+        owner: "{{ treehouse_user }}"
+        group: "{{ treehouse_group }}"
+
+    - name: Show on-disk size
+      ansible.builtin.command:
+        cmd: "ls -lh {{ target_pmtiles }}"
+      changed_when: false
+      register: ls_out
+
+    - name: Result
+      ansible.builtin.debug:
+        msg: "{{ ls_out.stdout }}"

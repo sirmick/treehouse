@@ -90,6 +90,9 @@ seed:                      ## Download every ZIM in group_vars (zims), kiwix-man
 ingest:                    ## Index every ZIM into MeiliSearch (VM-side; deps installed on first run)
 	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible-playbook -i inventory/libvirt-qemu ingest.yml'
 
+tiles:                     ## Download + extract OSM basemap PMTiles (~1 GB, slow; needs internet)
+	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible-playbook -i inventory/libvirt-qemu tiles.yml'
+
 # ----- backup --------------------------------------------------------------
 backup:                    ## Trigger a one-shot restic snapshot now
 	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible -i inventory/libvirt-qemu treehouse -b -m systemd -a "name=treehouse-backup.service state=started"'

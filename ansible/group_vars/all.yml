@@ -33,6 +33,7 @@ treehouse_paths:
   - "{{ treehouse_root }}/state"
   - "{{ treehouse_root }}/content"
   - "{{ treehouse_root }}/content/zims"
+  - "{{ treehouse_root }}/content/maps"
   # launcher/ is created + owned by the proxy role as www-data, since
   # nginx serves it. Keep it out of base/ to avoid an ownership tug-of-war.
   - "{{ treehouse_root }}/logs"
@@ -44,6 +45,19 @@ treehouse_paths:
 # `make down`). Off-box restic target — NAS/laptop on lan mode, USB
 # on isolated mode — is a future per-deployment override in
 # treehouse.yml; not built yet.
+# Basemap (OpenStreetMap via Protomaps PMTiles). One file per build,
+# extracted to a low-zoom subset so the planet fits in ~1 GB. The
+# launcher's /maps page reads it through host nginx (see /tiles/
+# location). Run `make tiles` to download + extract.
+#
+# Builds: https://maps.protomaps.com/builds — bump `build` and re-run.
+# `max_zoom` controls extract size (each level ~2× the previous;
+# z0-z6 ≈ 60 MB, z0-z10 ≈ ~1 GB).
+basemap:
+  build:        "20260507"
+  max_zoom:     10
+  pmtiles_cli:  "1.30.2"
+
 restic_repo:        "{{ treehouse_root }}/state/restic-repo"
 restic_password:    "milestone1-placeholder-rotate-me"
 restic_keep_daily:  7

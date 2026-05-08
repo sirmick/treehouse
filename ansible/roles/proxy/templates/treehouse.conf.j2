@@ -43,6 +43,16 @@ server {
         proxy_http_version 1.1;
     }
 
+    # /tiles/ — static PMTiles archives (planet.pmtiles etc.) served
+    # with HTTP range support, which MapLibre + the pmtiles JS library
+    # use to seek inside the file. nginx handles range automatically
+    # for static files. Bootstrap with `make tiles`.
+    location /tiles/ {
+        alias {{ treehouse_root }}/content/maps/;
+        types { application/octet-stream pmtiles; }
+        add_header Access-Control-Allow-Origin *;
+    }
+
 {% if h.landing is defined %}
     # Land users at {{ h.landing }} when they hit the bare hostname.
     location = / {
