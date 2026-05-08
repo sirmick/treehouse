@@ -3,7 +3,7 @@
         launcher-deps launcher-config launcher-build launcher-dev \
         dev-up dev-down dev-restart dev-logs \
         up down provision health ssh-treehouse \
-        verify-isolation seed-wikipedia backup restore-drill \
+        verify-isolation seed-wikipedia ingest backup restore-drill \
         test test-schemas test-compose test-live test-all test-deps \
         toolchain clean
 
@@ -98,11 +98,25 @@ verify-isolation:          ## Spin a throwaway tablet VM on br-kids and run the 
 	bin/verify-isolation-via-tablet.sh
 
 # ----- content -------------------------------------------------------------
+LOCAL_ZIM := content/zims/$(WIKIPEDIA_SEED_FILE)
+
 seed-wikipedia:            ## Fetch the manifest.yml zims[0] file (versioned by WIKIPEDIA_SEED_DATE)
 	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
 	ssh mick@$$IP "sudo curl -L -o /srv/treehouse/content/zims/$(WIKIPEDIA_SEED_FILE) $(WIKIPEDIA_SEED_URL) && \
 	  sudo docker exec --user root treehouse-kiwix kiwix-manage /data/library.xml add /data/$(WIKIPEDIA_SEED_FILE) && \
 	  sudo docker restart treehouse-kiwix"
+
+$(LOCAL_ZIM):
+	@mkdir -p content/zims
+	@echo "==> downloading $(WIKIPEDIA_SEED_FILE) (~50 MB)"
+	curl -L --fail --progress-bar -o "$(LOCAL_ZIM).partial" "$(WIKIPEDIA_SEED_URL)"
+	mv "$(LOCAL_ZIM).partial" "$(LOCAL_ZIM)"
+
+ingest: $(LOCAL_ZIM)        ## Walk the ZIM and index its articles into MeiliSearch (laptop dev path)
+	.venv/bin/python -m treehouse.searchd.ingest_kiwix \
+	  --zim $(LOCAL_ZIM) \
+	  --meili-url $${MEILI_URL:-http://127.0.0.1:7700} \
+	  --index treehouse
 
 # ----- backup --------------------------------------------------------------
 backup:                    ## Trigger a one-shot restic snapshot now

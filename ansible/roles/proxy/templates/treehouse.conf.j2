@@ -29,8 +29,19 @@ server {
     root {{ treehouse_root }}/launcher;
     index index.html;
 
+    # /api/search → MeiliSearch via the compose proxy. Same chain as
+    # wikipedia.kids below: host nginx → 127.0.0.1:18080 (compose
+    # proxy) → meilisearch container on the docker network.
+    location = /api/search {
+        proxy_pass http://127.0.0.1:18080/api/search;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+    }
+
+    # adapter-static produces flat .html files (search.html etc.);
+    # $uri.html is the second fallback so /search resolves correctly.
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files $uri $uri.html $uri/ /index.html;
     }
 }
 

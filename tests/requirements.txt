@@ -2,3 +2,8 @@ pytest>=7.4
 requests>=2.31
 pyyaml>=6.0
 pydantic>=2.5
+
+# Search ingestor (treehouse/searchd/) — v0 is BM25-only; embeddings
+# will be added when the AI gateway lands.
+libzim>=3
+meilisearch>=0.31

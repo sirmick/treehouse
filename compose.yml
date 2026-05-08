@@ -70,6 +70,39 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.13
+    container_name: treehouse-meili
+    restart: unless-stopped
+    ports:
+      # Loopback only — the ingestor (which runs on the laptop, not
+      # in compose) hits this. The launcher's browser-side fetch
+      # goes through the nginx /api/search proxy, not directly.
+      - "127.0.0.1:7700:7700"
+    volumes:
+      # State (indexes, snapshots, dumps). Backed up via restic
+      # alongside the rest of /srv/treehouse/state/ on the VM.
+      - ./state/meili:/meili_data
+    environment:
+      # Dev-mode: no master key required, public search endpoint.
+      # The VM provisioning will move to MEILI_ENV=production with a
+      # generated key — slice deferred until we expose anything that
+      # shouldn't be world-readable.
+      MEILI_ENV: development
+      MEILI_NO_ANALYTICS: "true"
+    networks: [treehouse-net]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:7700/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 networks:
   treehouse-net:
     driver: bridge
