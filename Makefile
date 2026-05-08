@@ -3,7 +3,7 @@
         launcher-deps launcher-config launcher-build launcher-dev \
         dev-up dev-down dev-restart dev-logs \
         up down wipe-content provision health ssh-treehouse \
-        verify-isolation seed ingest backup restore-drill \
+        provision-qa verify-isolation seed ingest backup restore-drill \
         test test-schemas test-compose test-live test-all test-deps \
         toolchain clean
 
@@ -81,8 +81,11 @@ wipe-content:              ## Delete the content qcow2 (next make up re-creates 
 	  echo "no content disk at $$CD (already wiped)"; \
 	fi
 
-provision:                 ## ansible-playbook against the VM
+provision:                 ## ansible-playbook against the VM (SSH via mgmt NIC)
 	cd $(ANSIBLE_DIR) && ansible-playbook -i inventory/libvirt site.yml
+
+provision-qa:              ## Same as provision but via qemu-guest-agent (no network needed)
+	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible-playbook -i inventory/libvirt-qemu site.yml'
 
 ssh-treehouse:             ## SSH into the treehouse VM
 	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \

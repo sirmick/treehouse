@@ -1,0 +1,20 @@
+# Static inventory for the qemu-guest-agent connection plugin.
+#
+# Doesn't depend on the VM having an IP we can reach — talks to the
+# libvirt domain by name via virtio-serial, which works regardless of
+# network state. Use this to provision when the libvirt-NAT mgmt path
+# is broken, or as the permanent path once the mgmt NIC is dropped.
+#
+# Requirements: community.libvirt collection (already shipped with
+# Debian's ansible package), running libvirtd, qemu-guest-agent
+# installed and running on the VM (cloud-init does this — see
+# bin/up.sh's user-data).
+#
+# Run with `sg libvirt -c 'ansible-playbook -i inventory/libvirt-qemu site.yml'`
+# (libvirt group needed to talk to libvirtd).
+
+[treehouse]
+treehouse ansible_connection=community.libvirt.libvirt_qemu ansible_libvirt_uri=qemu:///system ansible_user=mick
+
+[treehouse:vars]
+ansible_python_interpreter=/usr/bin/python3
