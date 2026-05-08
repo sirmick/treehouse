@@ -1,7 +1,6 @@
 .PHONY: help \
         bootstrap-host \
         launcher-deps launcher-config launcher-build launcher-dev \
-        dev-up dev-down dev-restart dev-logs \
         up down wipe-content provision shell health \
         verify-isolation seed ingest backup restore-drill \
         test test-schemas test-compose test-live test-all test-deps \
@@ -24,7 +23,6 @@ ANSIBLE_DIR := ansible
 INVENTORY   := $(ANSIBLE_DIR)/inventory/libvirt
 PLAYBOOK    := $(ANSIBLE_DIR)/site.yml
 COMPOSE     := docker compose
-COMPOSE_DEV := $(COMPOSE) -p treehouse
 
 # ZIM versioning lives in bin/ingest-all.sh and bin/seed-vm.sh (the
 # (kiwix-dir, catalog-name, version-date) tuples). Until the Phase-3
@@ -47,24 +45,9 @@ launcher-build: launcher-config ## Build static launcher assets into launcher/bu
 launcher-dev: launcher-config   ## Vite dev server for the launcher (hot reload, port 5173)
 	cd launcher && npm run dev
 
-# ----- daily dev (compose, no VM) ------------------------------------------
-dev-up: launcher-build     ## docker compose up -d (nginx + kiwix on the laptop)
-	$(COMPOSE_DEV) up -d
-	@echo
-	@echo "  Proxy: http://127.0.0.1:18080"
-	@echo "  Try:   curl -H 'Host: home.kids' http://127.0.0.1:18080/"
-
-dev-down:                  ## docker compose down
-	$(COMPOSE_DEV) down
-
-dev-restart:               ## restart the dev stack
-	$(COMPOSE_DEV) restart
-
-dev-logs:                  ## tail dev compose logs
-	$(COMPOSE_DEV) logs -f --tail=100
-
-dev-status:                ## ps the dev stack
-	$(COMPOSE_DEV) ps
+# Note: there's no `make dev-up` for laptop-side compose anymore. The
+# whole-stack test path runs through the VM via `make up && make
+# provision`; the launcher dev surface is `make launcher-dev` (vite).
 
 # ----- VM (libvirt) — milestone gates --------------------------------------
 up:                        ## Bring up the treehouse VM via libvirt
@@ -129,8 +112,8 @@ test:                      ## Schemas + compose + adapters + provisioner
 test-schemas:              ## Round-trip manifest/kids schemas
 	.venv/bin/python -m pytest schemas/ -v
 
-test-compose: launcher-build  ## Compose stack: kiwix, proxy host-routing, sinkhole
-	.venv/bin/python -m pytest tests/test_compose.py tests/test_compose_proxy.py tests/test_adapters.py tests/test_provisioner.py -v
+test-compose:              ## Spin up kiwix in compose, run kiwix + adapter + provisioner tests
+	.venv/bin/python -m pytest tests/test_compose.py tests/test_adapters.py tests/test_provisioner.py -v
 
 test-live:                 ## Hit the deployed VM via SSH local-forward to 10.10.10.1:80
 	bin/test-live.sh

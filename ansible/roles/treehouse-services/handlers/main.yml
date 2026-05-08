@@ -1,20 +1,7 @@
 ---
 - name: docker compose up
+  # --remove-orphans cleans up containers that were in a previous
+  # compose.yml but aren't now (e.g. when we dropped the proxy
+  # service). Without it, the stale containers linger.
   ansible.builtin.command:
-    cmd: docker compose -f {{ treehouse_root }}/compose.yml up -d
-
-# Triggered when the nginx config tree under /srv/treehouse/nginx
-# changes. Bouncing (not reloading) is required: the compose volume
-# is a single-file bind mount, and ansible.builtin.copy writes
-# atomically (new inode), which leaves the container holding the old
-# inode forever. `nginx -s reload` re-reads the same stale path. A
-# container restart re-resolves the bind mount.
-#
-# failed_when: false so the handler is safe on a fresh box where
-# the proxy container doesn't yet exist (the docker-compose-up
-# handler creates it).
-- name: restart compose proxy
-  ansible.builtin.command:
-    cmd: docker compose -f {{ treehouse_root }}/compose.yml restart proxy
-  failed_when: false
-  changed_when: true
+    cmd: docker compose -f {{ treehouse_root }}/compose.yml up -d --remove-orphans

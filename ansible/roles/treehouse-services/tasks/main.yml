@@ -1,11 +1,12 @@
 ---
-# Render compose.yml, bring up the kiwix container, wait for health.
+# Render compose.yml, bring up the content containers (kiwix,
+# meilisearch). Host nginx talks to those containers directly via the
+# loopback ports they publish — no compose-side proxy in between.
 
-# compose.yml uses RELATIVE volume paths (./content/zims, ./nginx/...).
-# Compose resolves those relative to the compose file's own location, so
-# the file plus its sibling trees (nginx/, content/) must all live at
-# /srv/treehouse/ — mirroring the repo layout. Don't bury it under
-# /config/ or the bind-mounts point at the wrong directory.
+# compose.yml uses RELATIVE volume paths (./content/zims, ./state/meili).
+# Compose resolves those relative to the compose file's own location,
+# so the file plus its sibling trees (content/, state/) must all live
+# at /srv/treehouse/ — mirroring the repo layout.
 - name: compose.yml at /srv/treehouse
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../compose.yml"
@@ -14,18 +15,6 @@
     group: "{{ treehouse_group }}"
     mode: "0644"
   notify: docker compose up
-
-- name: nginx tree at /srv/treehouse/nginx
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../nginx/"
-    dest: "{{ treehouse_root }}/nginx/"
-    owner: "{{ treehouse_user }}"
-    group: "{{ treehouse_group }}"
-    mode: "0644"
-    directory_mode: "0755"
-  notify:
-    - docker compose up
-    - restart compose proxy
 
 - name: Library.xml stub if missing (so kiwix-serve starts even with no ZIMs)
   ansible.builtin.copy:
@@ -44,8 +33,3 @@
     cmd: docker compose -f {{ treehouse_root }}/compose.yml up -d
   register: compose_up
   changed_when: "'Started' in compose_up.stdout or 'Created' in compose_up.stdout"
-
-# Kiwix's port 8080 is not exposed on the host — it lives on the
-# treehouse-net docker bridge. Health is verified via `make test-live`
-# (against the host nginx) and `make seed-wikipedia` (which docker-execs
-# kiwix-manage inside the container).

@@ -1,16 +1,17 @@
 """
 Shared pytest fixtures.
 
-- `compose_stack` (session-scoped): brings up `compose.test.yml` (caddy +
-  kiwix), waits for healthy, yields the kiwix-direct base URL. Used by
-  the kiwix-specific tests in test_compose.py.
+- `compose_stack` (session-scoped): brings up `compose.test.yml`
+  (kiwix only), waits for healthy, yields the kiwix base URL. Used
+  by tests/test_compose.py and tests/test_adapters.py.
 
-- `caddy_base` (session-scoped): same stack, yields the caddy base URL.
-  Used by the host-routing tests in test_compose_caddy.py — these
-  validate the same logic as test_live.py without needing the VM.
+- `live_base`: returns the netloc of a running treehouse VM if
+  reachable, else skips. Used by tests/test_live.py.
 
-- `live_base`: returns the IP of a running treehouse VM if reachable,
-  else skips. Used by tests/test_live.py.
+Host-routing tests previously lived here (test_compose_proxy.py)
+against a compose-side proxy. That proxy was eliminated when host
+nginx started talking to backends directly; routing tests now live
+in test_live.py against the deployed VM.
 """
 
 from __future__ import annotations
@@ -30,7 +31,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 COMPOSE_FILE = REPO_ROOT / "compose.test.yml"
 PROJECT = "treehouse-test"
 KIWIX_PORT = 18180
-PROXY_PORT = 18181
 
 
 def _docker_compose() -> list[str]:
@@ -84,13 +84,9 @@ def _stack_up() -> Iterator[dict[str, str]]:
         pytest.fail(f"docker compose up failed:\n{up.stdout}\n{up.stderr}")
 
     kiwix = f"http://127.0.0.1:{KIWIX_PORT}"
-    proxy = f"http://127.0.0.1:{PROXY_PORT}"
 
     try:
         _wait_for_http(f"{kiwix}/", timeout=90)
-        # Proxy depends_on:service_healthy, so it should be up by now,
-        # but a quick probe confirms it.
-        _wait_for_http(proxy, timeout=30)
     except TimeoutError as e:
         logs = subprocess.run(
             [*dc, "-p", PROJECT, "-f", str(COMPOSE_FILE), "logs"],
@@ -98,7 +94,7 @@ def _stack_up() -> Iterator[dict[str, str]]:
         )
         pytest.fail(f"{e}\n\n--- compose logs ---\n{logs.stdout}\n{logs.stderr}")
 
-    yield {"kiwix": kiwix, "proxy": proxy}
+    yield {"kiwix": kiwix}
 
     subprocess.run(
         [*dc, "-p", PROJECT, "-f", str(COMPOSE_FILE), "down", "-v", "--remove-orphans"],
@@ -108,16 +104,8 @@ def _stack_up() -> Iterator[dict[str, str]]:
 
 @pytest.fixture(scope="session")
 def compose_stack(_stack_up: dict[str, str]) -> str:
-    """Direct kiwix base URL — for tests that hit kiwix without caddy."""
+    """Direct kiwix base URL."""
     return _stack_up["kiwix"]
-
-
-@pytest.fixture(scope="session")
-def proxy_base(_stack_up: dict[str, str]) -> str:
-    """Proxy (nginx/caddy) base URL — for tests that validate
-    host-header routing. Technology-agnostic name so swapping the
-    proxy doesn't churn test code."""
-    return _stack_up["proxy"]
 
 
 @pytest.fixture(scope="session")

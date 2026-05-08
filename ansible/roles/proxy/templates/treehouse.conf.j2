@@ -11,6 +11,10 @@
 # so requests like `Host: home-kids.<your-domain>` hit the same backend.
 # (Public domain is per-deployment; treehouse.yml is gitignored, with
 # treehouse.example.yml as the committed template.)
+#
+# Backends (kiwix, meilisearch) publish on the VM's loopback via the
+# compose port mappings. Host nginx forwards directly — no compose
+# proxy in between.
 
 # Default server — sinkhole for any unrecognised Host header.
 server {
@@ -23,7 +27,7 @@ server {
     }
 }
 
-# home.kids — placeholder landing page.
+# home.kids — launcher static site + /api/search proxy to MeiliSearch.
 server {
     listen {{ kids_host_ip }}:80;
     server_name home.kids hello.kids
@@ -31,17 +35,11 @@ server {
     root {{ treehouse_root }}/launcher;
     index index.html;
 
-    # /api/search → MeiliSearch via the compose proxy. Same chain as
-    # wikipedia.kids below: host nginx → 127.0.0.1:18080 (compose
-    # proxy) → meilisearch container on the docker network.
-    #
-    # Override Host to the internal `.kids` name so the compose proxy
-    # matches its vhost without needing to know the public domain
-    # (which is per-deployment + gitignored).
+    # /api/search → MeiliSearch directly. The browser POSTs JSON; nginx
+    # rewrites the path to MeiliSearch's index-search endpoint.
     location = /api/search {
-        proxy_pass http://127.0.0.1:18080/api/search;
+        proxy_pass http://127.0.0.1:7700/indexes/treehouse/search;
         proxy_http_version 1.1;
-        proxy_set_header Host home.kids;
     }
 
     # adapter-static produces flat .html files (search.html etc.);
@@ -51,24 +49,22 @@ server {
     }
 }
 
-# wikipedia.kids — forward to the compose proxy (127.0.0.1:18080),
-# which routes by Host header to kiwix on the docker bridge. Keeps
-# the host nginx ignorant of compose's internal IPs.
-#
-# Host header is overridden to the internal `.kids` name so the
-# compose proxy doesn't need to recognise the public alias (which is
-# per-deployment + gitignored).
+# wikipedia.kids — forward straight to the kiwix container on
+# 127.0.0.1:8080. Multiple kiwix books (Wikipedia, Wiktionary, Vikidia)
+# are all served from the same container under /content/<book>/...
+# paths; the launcher's search results build URLs against this vhost.
 server {
     listen {{ kids_host_ip }}:80;
     server_name wikipedia.kids {{ hostnames.wikipedia.public }};
 
     location / {
-        proxy_pass http://127.0.0.1:18080;
+        proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
-        proxy_set_header Host              wikipedia.kids;
+        proxy_set_header Host              $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # Kiwix can be slow on first ZIM read; tolerate it.
         proxy_read_timeout 60s;
     }
 }

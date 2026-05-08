@@ -1,60 +1,40 @@
-# Treehouse stack — runs on the box (VM today, Pi tomorrow) AND on the
-# developer's laptop for daily iteration.
+# Treehouse stack — content services, run on the box (VM today, Pi
+# tomorrow). The host nginx (provisioned by ansible/roles/proxy) is
+# the only external entry point; backends here publish on the VM's
+# loopback and host nginx forwards by Host header.
 #
-# Daily-dev path (laptop): `docker compose up -d`. Hits nginx at
-# 127.0.0.1:18080 with explicit Host: headers. No dnsmasq needed.
-#
-# Production path (VM): the Ansible treehouse-services role drops this
-# file at /srv/treehouse/compose.yml (plus the sibling nginx/ + content/
-# trees) so the relative volume paths resolve the same way as on the
-# laptop.
+# The compose stack is a deployment unit on the box; there's no
+# laptop-dev `docker compose up -d` workflow anymore (use vite for
+# launcher iteration via `make launcher-dev`, run full-stack tests
+# through the VM via the public path).
 #
 # Future milestones add kolibri, sugarizer, peertube, synapse,
-# calibre-web, tileserver, ollama, launcher, searchd, aigateway. Each
-# is a separate service block on the same private network.
+# calibre-web, tileserver, ollama, launcher (broker), searchd,
+# aigateway. Each is a separate service block on the same private
+# network.
 
 services:
-  proxy:
-    image: nginx:1.27-alpine
-    container_name: treehouse-proxy
-    restart: unless-stopped
-    ports:
-      # Compose-host port. VM publishes 80 on the kids-segment IP via
-      # the Ansible proxy role; on the laptop we use 18080 to avoid
-      # needing root.
-      - "127.0.0.1:18080:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # SvelteKit-built static assets. `make build-launcher` (or
-      # `npm run build` in launcher/) populates this dir.
-      - ./launcher/build:/srv/launcher:ro
-    networks: [treehouse-net]
-    # service_started, not service_healthy: the launcher (home.kids,
-    # sinkhole) must come up even before any ZIM has been seeded. With
-    # service_healthy, an empty library would block all routes including
-    # the home page.
-    depends_on:
-      kiwix:
-        condition: service_started
-
   kiwix:
     image: ghcr.io/kiwix/kiwix-serve:3.7.0
     container_name: treehouse-kiwix
     restart: unless-stopped
+    ports:
+      # Loopback only — host nginx forwards wikipedia.kids here.
+      - "127.0.0.1:8080:8080"
     volumes:
       # rw because `kiwix-manage add` writes /data/library.xml at seed time.
       - ./content/zims:/data
     # Wrap kiwix-serve so an empty library.xml (no ZIMs seeded yet)
     # doesn't restart-loop the container. kiwix-tools 3.7.0 treats an
     # empty library as a load failure and exits — we'd rather idle and
-    # let `make seed-wikipedia` populate the library, then restart us.
+    # let `make seed` populate the library, then restart us.
     entrypoint: ["sh", "-c"]
     command:
       - |
         if /usr/local/bin/kiwix-serve --port=8080 --library /data/library.xml; then
           :
         else
-          echo "kiwix-serve exited (empty library?) — idling. Run make seed-wikipedia, then docker restart treehouse-kiwix." >&2
+          echo "kiwix-serve exited (empty library?) — idling. Run make seed, then docker restart treehouse-kiwix." >&2
           exec sleep infinity
         fi
     networks: [treehouse-net]
@@ -75,21 +55,19 @@ services:
     container_name: treehouse-meili
     restart: unless-stopped
     ports:
-      # Loopback only — the ingestor (which runs on the laptop, not
-      # in compose) hits this. The launcher's browser-side fetch
-      # goes through the nginx /api/search proxy, not directly.
+      # Loopback only — host nginx forwards /api/search here. The
+      # ingestor (ansible/ingest.yml) talks to it via this same port
+      # since both run inside the VM.
       - "127.0.0.1:7700:7700"
     volumes:
-      # State (indexes, snapshots, dumps). Backed up via restic
-      # alongside the rest of /srv/treehouse/state/ on the VM.
-      # /srv/treehouse/state is a bind mount onto the persistent
-      # content disk, so the index survives `make down`.
+      # State (indexes, snapshots, dumps). Lives on the bind-mounted
+      # state subdir of the persistent content disk — survives a
+      # `make down`/`make up` cycle.
       - ./state/meili:/meili_data
     environment:
       # Dev-mode: no master key required, public search endpoint.
-      # The VM provisioning will move to MEILI_ENV=production with a
-      # generated key — slice deferred until we expose anything that
-      # shouldn't be world-readable.
+      # Production-mode (with a generated key) is a future slice;
+      # nothing exposes the index outside the VM today.
       MEILI_ENV: development
       MEILI_NO_ANALYTICS: "true"
     networks: [treehouse-net]

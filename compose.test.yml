@@ -1,26 +1,12 @@
-# Test variant of compose.yml. Mirrors the production stack (nginx +
-# kiwix) but on different ports (18180/18181 vs 18080) and a different
-# project name (treehouse-test) so a tester running tests doesn't
-# collide with their own `make dev-up` stack.
+# Test variant of compose.yml. Brings up the kiwix container alone on
+# a non-default port so tests don't collide with anything the user has
+# running. Used by tests/conftest.py.
 #
-# Used by tests/conftest.py.
+# No proxy here — production lost the compose-side proxy; tests now
+# hit kiwix directly. Host-routing tests live in test_live.py against
+# the deployed VM (see docs/commands.md).
 
 services:
-  proxy:
-    image: nginx:1.27-alpine
-    container_name: treehouse-test-proxy
-    restart: "no"
-    ports:
-      - "127.0.0.1:18181:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # SvelteKit-built static assets, same as production compose.yml.
-      # `make test-compose` depends on launcher-build to populate this.
-      - ./launcher/build:/srv/launcher:ro
-    depends_on:
-      kiwix:
-        condition: service_healthy
-
   kiwix:
     image: ghcr.io/kiwix/kiwix-serve:3.7.0
     container_name: treehouse-test-kiwix
