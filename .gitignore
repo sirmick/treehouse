@@ -30,6 +30,10 @@ logs/
 content/
 launcher/build/
 
+# Per-deployment settings (LAN IPs, public domain). The template lives
+# at treehouse.example.yml; copy and edit locally.
+treehouse.yml
+
 # Restic password files
 *.restic-password
 

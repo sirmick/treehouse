@@ -33,7 +33,8 @@ treehouse/
 │   ├── launcher-config-gen         # writes launcher/src/lib/config.ts from yaml
 │   └── cfg                         # tiny YAML reader for shell consumers
 ├── Makefile                        # all targets (see docs/commands.md)
-├── treehouse.yml                   # per-deployment infra (network mode, hostnames)
+├── treehouse.example.yml           # committed template for per-deployment infra
+├── treehouse.yml                   # gitignored; copy from .example.yml and edit locally
 ├── manifest.yml                    # content (declarative; Phase-3 updater target)
 ├── kids.yml                        # kids (declarative; planned, schema in schemas/)
 ├── compose.yml                     # all containers

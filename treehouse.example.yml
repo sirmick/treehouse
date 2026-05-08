@@ -6,12 +6,16 @@
 #   - bin/up.sh                       — picks libvirt args from `network:`
 #   - ansible (vars_files in site.yml) — group_vars/all.yml derives
 #                                        legacy flat names from this
-#   - launcher build (slice 5+)       — tile hrefs from `hostnames:`
+#   - launcher build                  — tile hrefs from `hostnames:`
 #
-# Defaults below match the original M1 isolated-mode design so a fresh
-# clone behaves exactly the way the docs describe. Override for your
-# deployment by editing this file (it's checked in, not gitignored — the
-# committed values are the canonical "demo / isolated dev VM" preset).
+# This file (treehouse.example.yml) is the committed template with safe
+# placeholder values. On a fresh clone:
+#
+#   cp treehouse.example.yml treehouse.yml
+#   $EDITOR treehouse.yml             # set the lan IP, public domain, etc.
+#
+# treehouse.yml itself is gitignored, so personal-deployment values
+# (LAN IPs, public domain) stay out of the committed history.
 
 network:
   # mode = isolated: second NIC on libvirt's br-kids (no DHCP from LAN,
@@ -20,10 +24,11 @@ network:
   #                  is meaningful in this mode.
   # mode = lan:      second NIC macvtap-bridged onto the host's LAN NIC.
   #                  The VM gets a static IP on the LAN; LAN devices
-  #                  (e.g. proxy.home.arpa) can reach it. dnsmasq is
-  #                  disabled — the LAN's existing resolver is used. Trade:
-  #                  no structural isolation, so `verify-isolation` no
-  #                  longer applies and is gated off in this mode.
+  #                  (e.g. an upstream reverse proxy) can reach it.
+  #                  dnsmasq is disabled — the LAN's existing resolver
+  #                  is used. Trade: no structural isolation, so
+  #                  `verify-isolation` no longer applies and is gated
+  #                  off in this mode.
   mode: isolated
 
   isolated:
@@ -35,10 +40,14 @@ network:
     bridge:     br-kids        # libvirt network name
 
   lan:
-    host_iface: enp3s0          # host NIC to macvtap-bridge onto
-    ip:         172.16.16.61/24
-    gateway:    172.16.16.1
-    dns:        [172.16.16.1]
+    # Host NIC to macvtap-bridge onto. Override per laptop.
+    host_iface: enp3s0
+    # Placeholder values — TEST-NET-1 (RFC 5737, safe for examples).
+    # Set these to your LAN's actual subnet before flipping mode to
+    # `lan`.
+    ip:         192.0.2.50/24
+    gateway:    192.0.2.1
+    dns:        [192.0.2.1]
 
 # Public-name aliases for the kids vhosts. nginx adds the public name as
 # a server_name alongside the internal Host header (so `Host: home.kids`
@@ -46,8 +55,11 @@ network:
 # launcher build uses the public name for tile hrefs when running in
 # `network.mode == lan`.
 #
-# Keyed by a short id so other services (the launcher's tile config in
-# slice 5) can reference services by id rather than by hostname string.
+# Keyed by a short id so other services (the launcher's tile config)
+# can reference services by id rather than by hostname string.
+#
+# Replace example.com with your own public domain. The internal `.kids`
+# names are stable and don't need to change.
 hostnames:
   home:
     internal: home.kids

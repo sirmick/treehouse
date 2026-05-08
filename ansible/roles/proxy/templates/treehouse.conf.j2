@@ -8,7 +8,9 @@
 #
 # Each named vhost takes both its internal name (home.kids, etc.) AND
 # the configured public alias from treehouse.yml's hostnames: table —
-# so requests like Host: home-kids.example.com hit the same backend.
+# so requests like `Host: home-kids.<your-domain>` hit the same backend.
+# (Public domain is per-deployment; treehouse.yml is gitignored, with
+# treehouse.example.yml as the committed template.)
 
 # Default server — sinkhole for any unrecognised Host header.
 server {

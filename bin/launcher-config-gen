@@ -13,6 +13,14 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG="${TREEHOUSE_CONFIG:-$REPO_ROOT/treehouse.yml}"
+# Fresh-clone fallback: treehouse.yml is gitignored; use the committed
+# treehouse.example.yml so `make launcher-build` works out of the box.
+if [[ "$CONFIG" = "$REPO_ROOT/treehouse.yml" && ! -f "$CONFIG" ]]; then
+  if [[ -f "$REPO_ROOT/treehouse.example.yml" ]]; then
+    echo "[launcher-config-gen] no treehouse.yml; using treehouse.example.yml" >&2
+    CONFIG="$REPO_ROOT/treehouse.example.yml"
+  fi
+fi
 OUT="$REPO_ROOT/launcher/src/lib/config.ts"
 
 [[ -f "$CONFIG" ]] || { echo "config not found: $CONFIG" >&2; exit 1; }

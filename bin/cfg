@@ -17,7 +17,16 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Fresh clones don't have treehouse.yml (gitignored); fall back to the
+# committed example with a stderr note so isolated-mode `make up` works
+# out of the box. Override with -f or TREEHOUSE_CONFIG.
 CONFIG="${TREEHOUSE_CONFIG:-$REPO_ROOT/treehouse.yml}"
+if [[ "$CONFIG" = "$REPO_ROOT/treehouse.yml" && ! -f "$CONFIG" ]]; then
+  if [[ -f "$REPO_ROOT/treehouse.example.yml" ]]; then
+    echo "[cfg] no treehouse.yml; using treehouse.example.yml (copy + edit it for your deployment)" >&2
+    CONFIG="$REPO_ROOT/treehouse.example.yml"
+  fi
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
