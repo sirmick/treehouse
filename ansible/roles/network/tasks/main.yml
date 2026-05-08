@@ -16,8 +16,13 @@
 # the host netns). The tablet-VM verify-isolation probe catches it.
 - name: Detect mgmt + kids interfaces
   ansible.builtin.set_fact:
-    mgmt_iface: "{{ ansible_default_ipv4.interface }}"
-    kids_iface: "{{ (ansible_facts.interfaces | select('match', '^(en|eth)') | difference([ansible_default_ipv4.interface]) | sort) | first }}"
+    # Single-NIC VMs (the post-mgmt-NIC-removal default — see bin/up.sh
+    # comment on why the dual-NIC pattern was dev-only): the kids NIC
+    # IS the default route's interface. mgmt_iface is set to the same
+    # value purely so the nftables rules that reference it (SSH carve-out)
+    # don't blow up with `undefined`. There's no separate mgmt path.
+    kids_iface: "{{ (ansible_facts.interfaces | select('match', '^(en|eth)') | sort) | first }}"
+    mgmt_iface: "{{ (ansible_facts.interfaces | select('match', '^(en|eth)') | sort) | first }}"
 
 - name: Show detected interfaces
   ansible.builtin.debug:

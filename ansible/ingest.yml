@@ -1,0 +1,75 @@
+---
+# Run the ingestor against each ZIM in group_vars `zims`. Indexes
+# documents into MeiliSearch on the VM. Both content (ZIMs) and
+# state (MeiliSearch index) live on the persistent disk, so this
+# runs entirely VM-side — no SSH-forward from the laptop, no
+# laptop-side ZIM cache.
+#
+# First run installs python3-venv + libzim + meilisearch into a
+# venv at /srv/treehouse/state/searchd-venv, copies the ingestor
+# script onto the VM, then loops over zims invoking it. Subsequent
+# runs reuse the venv.
+#
+# Run via `make ingest`, which uses the qemu-guest-agent inventory.
+
+- name: Ingest ZIMs into MeiliSearch
+  hosts: treehouse
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../treehouse.yml
+
+  vars:
+    venv_dir: "{{ treehouse_root }}/state/searchd-venv"
+    searchd_dir: "{{ treehouse_root }}/state/searchd"
+
+  tasks:
+    - name: Required apt packages
+      ansible.builtin.apt:
+        name:
+          - python3-venv
+          - python3-pip
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Searchd dir on persistent state
+      ansible.builtin.file:
+        path: "{{ searchd_dir }}"
+        state: directory
+        owner: "{{ treehouse_user }}"
+        group: "{{ treehouse_group }}"
+        mode: "0755"
+
+    - name: Copy ingestor script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../treehouse/searchd/ingest_kiwix.py"
+        dest: "{{ searchd_dir }}/ingest_kiwix.py"
+        owner: "{{ treehouse_user }}"
+        group: "{{ treehouse_group }}"
+        mode: "0644"
+
+    - name: Create venv (idempotent)
+      ansible.builtin.command:
+        cmd: "python3 -m venv {{ venv_dir }}"
+        creates: "{{ venv_dir }}/bin/python"
+
+    - name: Install Python deps
+      ansible.builtin.pip:
+        virtualenv: "{{ venv_dir }}"
+        name:
+          - "libzim>=3"
+          - "meilisearch>=0.31"
+
+    - name: Run ingestor per ZIM (this is the slow part — minutes per ZIM)
+      ansible.builtin.command:
+        cmd: >-
+          {{ venv_dir }}/bin/python {{ searchd_dir }}/ingest_kiwix.py
+          --zim {{ treehouse_root }}/content/zims/{{ item.catalog }}_{{ item.version }}.zim
+          --source {{ item.source }}
+          --kind {{ item.kind }}
+          --meili-url http://127.0.0.1:7700
+          --index treehouse
+      loop: "{{ zims }}"
+      changed_when: true

@@ -2,8 +2,8 @@
         bootstrap-host \
         launcher-deps launcher-config launcher-build launcher-dev \
         dev-up dev-down dev-restart dev-logs \
-        up down wipe-content provision health ssh-treehouse \
-        provision-qa verify-isolation seed ingest backup restore-drill \
+        up down wipe-content provision shell health \
+        verify-isolation seed ingest backup restore-drill \
         test test-schemas test-compose test-live test-all test-deps \
         toolchain clean
 
@@ -81,15 +81,11 @@ wipe-content:              ## Delete the content qcow2 (next make up re-creates 
 	  echo "no content disk at $$CD (already wiped)"; \
 	fi
 
-provision:                 ## ansible-playbook against the VM (SSH via mgmt NIC)
-	cd $(ANSIBLE_DIR) && ansible-playbook -i inventory/libvirt site.yml
-
-provision-qa:              ## Same as provision but via qemu-guest-agent (no network needed)
+provision:                 ## ansible-playbook against the VM via qemu-guest-agent
 	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible-playbook -i inventory/libvirt-qemu site.yml'
 
-ssh-treehouse:             ## SSH into the treehouse VM
-	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
-	  ssh mick@$$IP
+shell:                     ## Open an interactive shell on the VM (virsh console; Ctrl-] to exit)
+	sg libvirt -c 'LIBVIRT_DEFAULT_URI=qemu:///system virsh console treehouse'
 
 # ----- isolation gate (runs probes from a throwaway VM on br-kids) ---------
 # verify-isolation only makes sense in isolated mode — the gate proves
@@ -104,27 +100,19 @@ verify-isolation:          ## Spin a throwaway tablet VM on br-kids and run the 
 	fi
 	bin/verify-isolation-via-tablet.sh
 
-# ----- content -------------------------------------------------------------
-seed:                      ## VM: download every ZIM in bin/seed-vm.sh, kiwix-manage add, restart kiwix
-	bin/seed-vm.sh
+# ----- content (runs on the VM via qemu-ga) --------------------------------
+seed:                      ## Download every ZIM in group_vars (zims), kiwix-manage add, restart kiwix
+	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible-playbook -i inventory/libvirt-qemu seed.yml'
 
-ingest:                    ## Laptop dev (or via SSH-forward): download + ingest every ZIM
-	bin/ingest-all.sh
+ingest:                    ## Index every ZIM into MeiliSearch (VM-side; deps installed on first run)
+	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible-playbook -i inventory/libvirt-qemu ingest.yml'
 
 # ----- backup --------------------------------------------------------------
 backup:                    ## Trigger a one-shot restic snapshot now
-	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
-	ssh mick@$$IP 'sudo systemctl start treehouse-backup.service'
+	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible -i inventory/libvirt-qemu treehouse -b -m systemd -a "name=treehouse-backup.service state=started"'
 
 restore-drill:             ## Take a fresh snapshot, then restore it to /tmp on the VM
-	@IP=$$(awk '/ansible_host=/ {sub(/.*ansible_host=/,""); sub(/ .*/,""); print}' $(INVENTORY)); \
-	ssh mick@$$IP '\
-	  sudo systemctl start treehouse-backup.service && \
-	  sudo rm -rf /tmp/restore-drill && \
-	  sudo restic --repo /srv/treehouse/restic-repo \
-	    --password-file /etc/treehouse/restic.password \
-	    restore latest --target /tmp/restore-drill && \
-	  sudo ls /tmp/restore-drill/srv/treehouse/'
+	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible -i inventory/libvirt-qemu treehouse -b -m shell -a "set -e; systemctl start treehouse-backup.service; rm -rf /tmp/restore-drill; restic --repo /srv/treehouse/state/restic-repo --password-file /etc/treehouse/restic.password restore latest --target /tmp/restore-drill; ls /tmp/restore-drill/srv/treehouse/"'
 
 # ----- health -------------------------------------------------------------
 health:                    ## Smoke test against the VM

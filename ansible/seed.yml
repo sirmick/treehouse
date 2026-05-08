@@ -1,0 +1,41 @@
+---
+# Download the ZIMs in group_vars `zims` onto the VM's persistent
+# content disk and register them with kiwix. Idempotent: skips
+# downloads if the file already exists; tolerates kiwix-manage's
+# already-present case.
+#
+# Run via `make seed`, which uses the qemu-guest-agent inventory.
+
+- name: Seed kiwix with ZIMs
+  hosts: treehouse
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../treehouse.yml
+
+  tasks:
+    - name: Download ZIM if missing
+      ansible.builtin.get_url:
+        url: "https://download.kiwix.org/zim/{{ item.dir }}/{{ item.catalog }}_{{ item.version }}.zim"
+        dest: "{{ treehouse_root }}/content/zims/{{ item.catalog }}_{{ item.version }}.zim"
+        mode: "0644"
+        timeout: 600
+      loop: "{{ zims }}"
+      register: dl
+
+    - name: Register ZIMs in kiwix library (idempotent — kiwix-manage
+            silently no-ops if already present)
+      ansible.builtin.command:
+        cmd: >-
+          docker exec --user root treehouse-kiwix
+          kiwix-manage /data/library.xml add
+          /data/{{ item.catalog }}_{{ item.version }}.zim
+      loop: "{{ zims }}"
+      register: km
+      failed_when: false
+      changed_when: km.rc == 0
+
+    - name: Restart kiwix to pick up library.xml
+      ansible.builtin.command: docker restart treehouse-kiwix
+      when: dl.changed or km.changed

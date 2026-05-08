@@ -25,16 +25,18 @@ BASE_IMAGE_URL="https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-
 BASE_IMAGE="$STORAGE/debian-12-genericcloud-amd64.qcow2"
 NET_XML="$REPO_ROOT/ansible/files/br-kids.xml"
 
-# Read network mode from treehouse.yml. The second NIC's libvirt args
-# differ between isolated (br-kids) and lan (macvtap-bridge on host NIC).
+# Read network mode from treehouse.yml. The VM has a single NIC on
+# the kids segment — no separate mgmt NIC. Control from the host is
+# via qemu-guest-agent over virtio-serial (community.libvirt.libvirt_qemu
+# in ansible). This matches the Pi-production shape.
 NETWORK_MODE="$("$REPO_ROOT/bin/cfg" network.mode)"
 case "$NETWORK_MODE" in
   isolated)
-    SECOND_NIC_ARG="network=$("$REPO_ROOT/bin/cfg" network.isolated.bridge),model=virtio"
+    KIDS_NIC_ARG="network=$("$REPO_ROOT/bin/cfg" network.isolated.bridge),model=virtio"
     ;;
   lan)
     LAN_IFACE="$("$REPO_ROOT/bin/cfg" network.lan.host_iface)"
-    SECOND_NIC_ARG="type=direct,source=${LAN_IFACE},source.mode=bridge,model=virtio"
+    KIDS_NIC_ARG="type=direct,source=${LAN_IFACE},source.mode=bridge,model=virtio"
     ;;
   *)
     echo "unknown network.mode in treehouse.yml: '$NETWORK_MODE' (expected: isolated | lan)" >&2
@@ -173,55 +175,31 @@ else
     --disk path="$SYSTEM_DISK",bus=virtio \
     --disk path="$CONTENT_DISK",bus=virtio,serial=treehouse-content \
     --disk path="$SEED_ISO",bus=virtio,readonly=on \
-    --network network=default,model=virtio \
-    --network ${SECOND_NIC_ARG} \
+    --network ${KIDS_NIC_ARG} \
+    --controller type=virtio-serial \
+    --channel unix,target.type=virtio,target.name=org.qemu.guest_agent.0 \
     --graphics none \
     --serial file,source.path="$STORAGE/$NAME-console.log",source.seclabel.model=dac,source.seclabel.relabel=yes,source.seclabel.label="+$(id -u):+$(id -g)" \
     --noautoconsole \
     --import
 fi
 
-# ----- wait for SSH ---------------------------------------------------------
-log "waiting for $NAME to acquire an IP on the management network"
-for _ in $(seq 1 60); do
-  IP="$(virsh domifaddr "$NAME" --source agent 2>/dev/null | awk '/ipv4/ && $4 ~ /default|192/ {print $4}' | head -1 | cut -d/ -f1 || true)"
-  [[ -n "${IP:-}" ]] && break
-  IP="$(virsh domifaddr "$NAME" 2>/dev/null | awk '$3 == "ipv4" {print $4}' | head -1 | cut -d/ -f1 || true)"
-  [[ -n "${IP:-}" ]] && break
-  sleep 2
-done
-
-if [[ -z "${IP:-}" ]]; then
-  log "could not detect IP — VM may still be booting; try: virsh domifaddr $NAME"
-  exit 1
-fi
-
-log "treehouse VM at $IP"
-
-# ----- inventory regeneration ----------------------------------------------
-INV="$REPO_ROOT/ansible/inventory/libvirt"
-mkdir -p "$(dirname "$INV")"
-cat > "$INV" <<EOF
-[treehouse]
-treehouse ansible_host=$IP ansible_user=mick
-
-[treehouse:vars]
-ansible_python_interpreter=/usr/bin/python3
-EOF
-log "wrote $INV"
-
-# ----- ssh probe ------------------------------------------------------------
-log "probing SSH..."
-for _ in $(seq 1 30); do
-  if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=2 \
-       "mick@$IP" 'echo ok' >/dev/null 2>&1; then
-    log "ssh to $NAME ok"
+# ----- wait for qemu-guest-agent --------------------------------------------
+# Single-NIC VMs have no laptop-reachable IP (kids segment is isolated
+# in `isolated` mode; macvtap blocks the host in `lan` mode). The way
+# in is the guest agent over virtio-serial. Cloud-init installs +
+# starts qemu-guest-agent; we just poll until it answers.
+log "waiting for qemu-guest-agent..."
+for _ in $(seq 1 90); do
+  if virsh qemu-agent-command "$NAME" '{"execute":"guest-ping"}' >/dev/null 2>&1; then
+    log "qemu-ga ready"
     log ""
-    log "next: make provision"
+    log "next: make provision   (uses ansible/inventory/libvirt-qemu)"
     exit 0
   fi
   sleep 2
 done
 
-log "VM up but ssh not yet ready — try 'ssh mick@$IP' in a moment"
-exit 0
+log "VM is up but qemu-ga didn't respond in 3 min — check console log:"
+log "  cat $STORAGE/$NAME-console.log"
+exit 1

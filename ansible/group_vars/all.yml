@@ -52,3 +52,26 @@ restic_keep_monthly: 12
 
 # Container images (pinned per deployment.md convention) --------------------
 kiwix_image:        "ghcr.io/kiwix/kiwix-serve:3.7.0"
+
+# ZIM seed/ingest list ------------------------------------------------------
+# Drives both ansible/seed.yml (download into kiwix's library) and
+# ansible/ingest.yml (chunk into MeiliSearch). The (dir, catalog, version)
+# tuple is what Phase-3's updater would resolve from the OPDS catalog;
+# until then we pin by hand. Bump versions when new builds land at
+# <https://download.kiwix.org/zim/>.
+zims:
+  - dir: wikipedia
+    catalog: wikipedia_en_simple_all_maxi
+    version: "2026-02"
+    source: wikipedia
+    kind: article
+  - dir: wiktionary
+    catalog: wiktionary_en_simple_all_nopic
+    version: "2026-04"
+    source: wiktionary
+    kind: definition
+  - dir: vikidia
+    catalog: vikidia_en_all_maxi
+    version: "2026-03"
+    source: vikidia
+    kind: article
