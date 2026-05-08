@@ -10,10 +10,10 @@
 	const tiles: Tile[] = [
 		{ label: 'Search', emoji: '🔍', href: '/search' },
 		{ label: 'Wikipedia', emoji: '📚', href: `http://${activeHost('wikipedia')}/` },
+		{ label: 'Maps', emoji: '🗺️', href: '/maps' },
 		{ label: 'Books', emoji: '📖' },
 		{ label: 'Videos', emoji: '🎬' },
 		{ label: 'Khan Academy', emoji: '🎓' },
-		{ label: 'Maps', emoji: '🗺️' },
 		{ label: 'Play', emoji: '🎨' },
 		{ label: 'Chat', emoji: '💬' }
 	];
