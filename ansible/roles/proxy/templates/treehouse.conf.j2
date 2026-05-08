@@ -1,16 +1,15 @@
 # nginx site config for the kids' segment.
 # Bound to {{ kids_host_ip }}:80 only.
 #
-# In isolated mode dnsmasq sinkholes every unknown hostname to this IP
-# so the default_server catches youtube.com / tiktok.com / etc. In lan
-# mode unknown Hosts mostly come from misconfigured proxies or probes,
-# but the default_server handles them the same way.
+# Generated from `hostnames:` in treehouse.yml — every entry there
+# becomes a server block here. To add a new top-level app: add one
+# entry, re-run `make provision`. No edits to this template needed
+# for ordinary additions.
 #
-# Each named vhost takes both its internal name (home.kids, etc.) AND
-# the configured public alias from treehouse.yml's hostnames: table —
-# so requests like `Host: home-kids.<your-domain>` hit the same backend.
-# (Public domain is per-deployment; treehouse.yml is gitignored, with
-# treehouse.example.yml as the committed template.)
+# In isolated mode dnsmasq sinkholes every unknown hostname to this IP
+# so the default_server below catches youtube.com / tiktok.com / etc.
+# In lan mode unknown Hosts mostly come from misconfigured proxies or
+# probes; the default_server handles them the same way.
 #
 # Backends (kiwix, meilisearch) publish on the VM's loopback via the
 # compose port mappings. Host nginx forwards directly — no compose
@@ -27,11 +26,13 @@ server {
     }
 }
 
-# home.kids — launcher static site + /api/search proxy to MeiliSearch.
+{% for h_id, h in hostnames.items() %}
+{% if h.serves == 'launcher' %}
+# {{ h_id }} — launcher static site{% if h.landing is defined %} (lands at {{ h.landing }}){% endif %}
+
 server {
     listen {{ kids_host_ip }}:80;
-    server_name home.kids hello.kids
-                {{ hostnames.home.public }} {{ hostnames.hello.public }};
+    server_name {{ h.internal }} {{ h.public }};
     root {{ treehouse_root }}/launcher;
     index index.html;
 
@@ -42,6 +43,13 @@ server {
         proxy_http_version 1.1;
     }
 
+{% if h.landing is defined %}
+    # Land users at {{ h.landing }} when they hit the bare hostname.
+    location = / {
+        return 302 {{ h.landing }};
+    }
+
+{% endif %}
     # adapter-static produces flat .html files (search.html etc.);
     # $uri.html is the second fallback so /search resolves correctly.
     location / {
@@ -49,13 +57,21 @@ server {
     }
 }
 
-# wikipedia.kids — forward straight to the kiwix container on
-# 127.0.0.1:8080. Multiple kiwix books (Wikipedia, Wiktionary, Vikidia)
-# are all served from the same container under /content/<book>/...
-# paths; the launcher's search results build URLs against this vhost.
+{% elif h.serves == 'kiwix' %}
+{% set z = (zims | selectattr('source', 'equalto', h.book) | list | first) %}
+{% set book_path = '/content/' ~ z.catalog ~ '_' ~ z.version ~ '/' %}
+# {{ h_id }} — kiwix book "{{ h.book }}" ({{ z.catalog }})
+
 server {
     listen {{ kids_host_ip }}:80;
-    server_name wikipedia.kids {{ hostnames.wikipedia.public }};
+    server_name {{ h.internal }} {{ h.public }};
+
+    # Land users on this book's content when they hit the bare hostname.
+    # The /content/<zim>/ path is the kiwix-stable per-book entry; the
+    # zim version moves only when group_vars `zims` updates.
+    location = / {
+        return 302 {{ book_path }};
+    }
 
     location / {
         proxy_pass http://127.0.0.1:8080;
@@ -68,3 +84,6 @@ server {
         proxy_read_timeout 60s;
     }
 }
+
+{% endif %}
+{% endfor %}

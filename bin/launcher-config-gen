@@ -37,7 +37,13 @@ with open(config_path) as f:
     cfg = yaml.safe_load(f)
 
 mode = cfg["network"]["mode"]
-hostnames = cfg["hostnames"]
+# Project hostnames down to {internal, public} — routing fields
+# (serves / landing / book) are nginx-only and don't ship to the
+# launcher.
+hostnames = {
+    h_id: {"internal": h["internal"], "public": h["public"]}
+    for h_id, h in cfg["hostnames"].items()
+}
 
 content = f"""// AUTO-GENERATED from /treehouse.yml by bin/launcher-config-gen.
 // Do not edit by hand — re-run `make launcher-config` instead.

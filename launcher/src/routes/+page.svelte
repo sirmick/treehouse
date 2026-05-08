@@ -8,10 +8,11 @@
 	};
 
 	const tiles: Tile[] = [
-		{ label: 'Search', emoji: '🔍', href: '/search' },
+		{ label: 'Search', emoji: '🔍', href: `http://${activeHost('search')}/` },
 		{ label: 'Wikipedia', emoji: '📚', href: `http://${activeHost('wikipedia')}/` },
-		{ label: 'Maps', emoji: '🗺️', href: '/maps' },
-		{ label: 'Books', emoji: '📖' },
+		{ label: 'Maps', emoji: '🗺️', href: `http://${activeHost('maps')}/` },
+		{ label: 'Dictionary', emoji: '📖', href: `http://${activeHost('dictionary')}/` },
+		{ label: 'Vikidia', emoji: '🌱', href: `http://${activeHost('vikidia')}/` },
 		{ label: 'Videos', emoji: '🎬' },
 		{ label: 'Khan Academy', emoji: '🎓' },
 		{ label: 'Play', emoji: '🎨' },

@@ -49,14 +49,28 @@ network:
     gateway:    192.0.2.1
     dns:        [192.0.2.1]
 
-# Public-name aliases for the kids vhosts. nginx adds the public name as
-# a server_name alongside the internal Host header (so `Host: home.kids`
-# and `Host: home-kids.example.com` both hit the same vhost). The
-# launcher build uses the public name for tile hrefs when running in
+# Public-name aliases for the kids vhosts. nginx adds the public name
+# alongside the internal Host header (so `Host: home.kids` and
+# `Host: home-kids.example.com` both hit the same vhost). The launcher
+# build uses the public name for tile hrefs when running in
 # `network.mode == lan`.
 #
-# Keyed by a short id so other services (the launcher's tile config)
-# can reference services by id rather than by hostname string.
+# Every top-level app on the box gets an entry here. One entry → one
+# nginx server block (auto-generated from this table) → one place
+# tile generators can look it up.
+#
+# Schema per entry:
+#   internal: <name>.kids                     # stable internal name
+#   public:   <name>-kids.<your-domain>       # public alias
+#   serves:   launcher | kiwix                # which backend
+#   landing:  /search | /maps  (optional)     # serves:launcher only —
+#                                             #   redirect / here
+#   book:     wikipedia | wiktionary | vikidia (optional)
+#                                             # serves:kiwix only —
+#                                             #   redirect / to that
+#                                             #   ZIM. Looked up in
+#                                             #   group_vars `zims` by
+#                                             #   the `source` field.
 #
 # Replace example.com with your own public domain. The internal `.kids`
 # names are stable and don't need to change.
@@ -64,9 +78,33 @@ hostnames:
   home:
     internal: home.kids
     public:   home-kids.example.com
+    serves:   launcher
   hello:
     internal: hello.kids
     public:   hello-kids.example.com
+    serves:   launcher
+  search:
+    internal: search.kids
+    public:   search-kids.example.com
+    serves:   launcher
+    landing:  /search
+  maps:
+    internal: maps.kids
+    public:   map-kids.example.com
+    serves:   launcher
+    landing:  /maps
   wikipedia:
     internal: wikipedia.kids
     public:   wiki-kids.example.com
+    serves:   kiwix
+    book:     wikipedia
+  dictionary:
+    internal: dictionary.kids
+    public:   dictionary-kids.example.com
+    serves:   kiwix
+    book:     wiktionary
+  vikidia:
+    internal: vikidia.kids
+    public:   vikidia-kids.example.com
+    serves:   kiwix
+    book:     vikidia
