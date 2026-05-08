@@ -34,10 +34,14 @@ server {
     # /api/search → MeiliSearch via the compose proxy. Same chain as
     # wikipedia.kids below: host nginx → 127.0.0.1:18080 (compose
     # proxy) → meilisearch container on the docker network.
+    #
+    # Override Host to the internal `.kids` name so the compose proxy
+    # matches its vhost without needing to know the public domain
+    # (which is per-deployment + gitignored).
     location = /api/search {
         proxy_pass http://127.0.0.1:18080/api/search;
         proxy_http_version 1.1;
-        proxy_set_header Host $host;
+        proxy_set_header Host home.kids;
     }
 
     # adapter-static produces flat .html files (search.html etc.);
@@ -49,9 +53,11 @@ server {
 
 # wikipedia.kids — forward to the compose proxy (127.0.0.1:18080),
 # which routes by Host header to kiwix on the docker bridge. Keeps
-# the host nginx ignorant of compose's internal IPs and means kiwix
-# itself doesn't need a host-side port published (avoiding the
-# collision where 8080 is taken on the laptop dev path).
+# the host nginx ignorant of compose's internal IPs.
+#
+# Host header is overridden to the internal `.kids` name so the
+# compose proxy doesn't need to recognise the public alias (which is
+# per-deployment + gitignored).
 server {
     listen {{ kids_host_ip }}:80;
     server_name wikipedia.kids {{ hostnames.wikipedia.public }};
@@ -59,7 +65,7 @@ server {
     location / {
         proxy_pass http://127.0.0.1:18080;
         proxy_http_version 1.1;
-        proxy_set_header Host              $host;
+        proxy_set_header Host              wikipedia.kids;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
