@@ -51,8 +51,10 @@ treehouse_paths:
 # location). Run `make tiles` to download + extract.
 #
 # Builds: https://maps.protomaps.com/builds — bump `build` and re-run.
-# `max_zoom` controls extract size (each level ~2× the previous;
-# z0-z6 ≈ 60 MB, z0-z10 ≈ ~1 GB).
+# `max_zoom` controls extract size. Empirical sizes from a 20260507
+# extract: z0-z6 ≈ 60 MB, z0-z8 ≈ 240 MB, z0-z10 ≈ 3.5 GB. Higher
+# zoom levels grow faster than the "doubling" rule of thumb because
+# they pick up dense urban tile coverage.
 basemap:
   build:        "20260507"
   max_zoom:     10
