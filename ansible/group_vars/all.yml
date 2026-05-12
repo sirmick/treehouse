@@ -18,8 +18,8 @@ kids_dhcp_start: "{{ network.isolated.dhcp_start }}"
 kids_dhcp_end:   "{{ network.isolated.dhcp_end }}"
 kids_domain:     "{{ network.isolated.domain }}"
 kids_bridge:     "{{ network.isolated.bridge }}"
-# kids_iface and mgmt_iface are detected dynamically by the network role
-# (set_fact). Don't pin them here — names depend on kernel naming policy.
+# kids_iface is detected dynamically by the network role (set_fact).
+# Don't pin it here — names depend on kernel naming policy.
 
 kids_vhosts:        "{{ hostnames.values() | map(attribute='internal') | list + ['admin.kids'] }}"
 

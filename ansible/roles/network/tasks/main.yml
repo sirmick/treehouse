@@ -3,9 +3,9 @@
 # dnsmasq as DHCP+DNS authority, nftables as the drop-all-forward
 # defense layer. See docs/network.md.
 
-# ----- Detect interfaces ---------------------------------------------------
+# ----- Detect interface ----------------------------------------------------
 # Don't assume eth0/eth1. With Debian's default predictable naming the
-# interfaces are enpXsY; with `net.ifnames=0` they're ethN. We bind to
+# interface is enpXsY; with `net.ifnames=0` it's ethN. We bind to
 # whatever the kernel actually has so the playbook works either way.
 #
 # IMPORTANT: filter to physical-NIC name patterns (en*, eth*). A naive
@@ -14,19 +14,17 @@
 # bridge instead of the kids NIC — silently, since `curl 10.10.10.1`
 # from inside the VM still works (the docker bridge IS reachable from
 # the host netns). The tablet-VM verify-isolation probe catches it.
-- name: Detect mgmt + kids interfaces
+#
+# Single-NIC VM by design: control plane is qemu-guest-agent over
+# virtio-serial, not a separate mgmt NIC. SSH is reached over the
+# same kids NIC; sshd config (key-only, no root login) is the gate.
+- name: Detect kids interface
   ansible.builtin.set_fact:
-    # Single-NIC VMs (the post-mgmt-NIC-removal default — see bin/up.sh
-    # comment on why the dual-NIC pattern was dev-only): the kids NIC
-    # IS the default route's interface. mgmt_iface is set to the same
-    # value purely so the nftables rules that reference it (SSH carve-out)
-    # don't blow up with `undefined`. There's no separate mgmt path.
     kids_iface: "{{ (ansible_facts.interfaces | select('match', '^(en|eth)') | sort) | first }}"
-    mgmt_iface: "{{ (ansible_facts.interfaces | select('match', '^(en|eth)') | sort) | first }}"
 
-- name: Show detected interfaces
+- name: Show detected interface
   ansible.builtin.debug:
-    msg: "mgmt={{ mgmt_iface }}  kids={{ kids_iface }}"
+    msg: "kids_iface={{ kids_iface }}"
 
 - name: Required packages
   ansible.builtin.apt:
@@ -154,15 +152,13 @@
               ct state established,related accept
               iifname "lo" accept
 
-              # Kids segment may reach host services on these ports.
-              iifname "{{ kids_iface }}" tcp dport { 53, 80, 443 } accept
+              # Kids segment may reach host services on these ports. SSH
+              # is on the same iface (single-NIC VM, no separate mgmt
+              # path); sshd config gates auth.
+              iifname "{{ kids_iface }}" tcp dport { 22, 53, 80, 443 } accept
               iifname "{{ kids_iface }}" udp dport { 53, 67, 68, 123 } accept
               # ICMP for ping diagnostics.
               iifname "{{ kids_iface }}" ip protocol icmp accept
-
-              # Management interface ({{ mgmt_iface }}): SSH only.
-              iifname "{{ mgmt_iface }}" tcp dport 22 accept
-              iifname "{{ mgmt_iface }}" ct state new tcp dport 22 accept
           }
 
           chain output {
