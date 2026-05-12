@@ -4,11 +4,6 @@
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { Protocol } from 'pmtiles';
 	import { layers, namedFlavor } from '@protomaps/basemaps';
-	import { activeHost } from '$lib/config';
-
-	// On map-kids, `/` redirects back to `/maps` — so the Home link
-	// has to point at the home FQDN, not at a relative `/`.
-	const homeHref = `http://${activeHost('home')}/`;
 
 	let container: HTMLDivElement;
 	let tilesMissing = $state(false);
@@ -73,23 +68,20 @@
 	<title>Maps · Treehouse</title>
 </svelte:head>
 
-<main class="flex min-h-screen flex-col px-4 py-8 sm:px-8 sm:py-10">
-	<header class="mx-auto mb-6 flex w-full max-w-5xl items-center justify-between">
-		<a
-			href={homeHref}
-			class="text-sm font-medium text-slate-500 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300"
-		>
-			← Home
-		</a>
-		<span class="text-2xl" aria-hidden="true">🗺️</span>
-	</header>
-
+<main class="flex min-h-screen flex-col px-4 py-4 sm:px-8 sm:py-6">
+	<!--
+		MapLibre's container needs a sized, positioned element. We give
+		it the flex-1 box directly with an inline `position: relative`
+		so MapLibre's defensive "set position if static" code (which
+		runs an inline style and would otherwise beat Tailwind's class)
+		can't make it relative-with-no-size. Inline style also keeps
+		the height intact regardless of CSS-load timing.
+	-->
 	<div
-		class="relative mx-auto w-full max-w-5xl flex-1 overflow-hidden rounded-3xl bg-sky-100 shadow-inner ring-1 ring-slate-200"
-		style="min-height: 70vh"
+		bind:this={container}
+		class="mx-auto w-full max-w-5xl flex-1 overflow-hidden rounded-3xl bg-sky-100 shadow-inner ring-1 ring-slate-200"
+		style="position: relative; min-height: 70vh"
 	>
-		<div bind:this={container} class="absolute inset-0"></div>
-
 		{#if tilesMissing}
 			<div class="absolute inset-0 flex items-center justify-center bg-white/80 px-8 text-center">
 				<div class="max-w-md">

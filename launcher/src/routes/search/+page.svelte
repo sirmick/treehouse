@@ -1,9 +1,6 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { activeHost, hostnames } from '$lib/config';
-
-	// On search-kids, `/` redirects to `/search` — so the Home link
-	// has to point at the home FQDN, not at a relative `/`.
-	const homeHref = `http://${activeHost('home')}/`;
 
 	type Hit = {
 		id: string;
@@ -34,6 +31,37 @@
 	let error = $state<string | null>(null);
 	let lastQuery = $state('');
 
+	// Top bar (injected into kiwix pages) submits its search form to
+	// /search?q=…, so picking up `q` here is how cross-app search works.
+	onMount(() => {
+		const q = new URL(window.location.href).searchParams.get('q')?.trim();
+		if (q) {
+			query = q;
+			runQuery(q);
+		}
+	});
+
+	async function runQuery(q: string) {
+		busy = true;
+		error = null;
+		lastQuery = q;
+		try {
+			const r = await fetch('/api/search', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ q, limit: 20 })
+			});
+			if (!r.ok) throw new Error(`search failed: ${r.status}`);
+			const data = await r.json();
+			hits = (data.hits ?? []) as Hit[];
+		} catch (err) {
+			error = err instanceof Error ? err.message : String(err);
+			hits = [];
+		} finally {
+			busy = false;
+		}
+	}
+
 	function urlFor(hit: Hit): string {
 		// Each source routes through its own FQDN (wiki-kids,
 		// dictionary-kids, vikidia-kids). Sources we don't know fall
@@ -52,26 +80,7 @@
 		e.preventDefault();
 		const q = query.trim();
 		if (!q) return;
-		busy = true;
-		error = null;
-		lastQuery = q;
-		try {
-			const r = await fetch('/api/search', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ q, limit: 20 })
-			});
-			if (!r.ok) {
-				throw new Error(`search failed: ${r.status}`);
-			}
-			const data = await r.json();
-			hits = (data.hits ?? []) as Hit[];
-		} catch (err) {
-			error = err instanceof Error ? err.message : String(err);
-			hits = [];
-		} finally {
-			busy = false;
-		}
+		await runQuery(q);
 	}
 </script>
 
@@ -79,18 +88,8 @@
 	<title>Search · Treehouse</title>
 </svelte:head>
 
-<main class="min-h-screen px-4 py-8 sm:px-8 sm:py-12">
+<main class="min-h-screen px-4 py-4 sm:px-8 sm:py-6">
 	<div class="mx-auto max-w-3xl">
-		<header class="mb-8 flex items-center justify-between">
-			<a
-				href={homeHref}
-				class="text-sm font-medium text-slate-500 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300"
-			>
-				← Home
-			</a>
-			<span class="text-2xl" aria-hidden="true">🔍</span>
-		</header>
-
 		<form onsubmit={search} class="mb-6">
 			<label for="q" class="sr-only">What would you like to learn about?</label>
 			<input

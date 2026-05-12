@@ -14,6 +14,19 @@
 # Backends (kiwix, meilisearch) publish on the VM's loopback via the
 # compose port mappings. Host nginx forwards directly — no compose
 # proxy in between.
+#
+# Non-launcher content (kiwix today; kolibri/peertube/etc. later) gets
+# the shared Treehouse top bar injected by sub_filter so the kid always
+# has search + quicklinks back to launcher functions. The bar is one
+# vanilla JS file (launcher/static/topbar.js), loaded from the home
+# vhost; nginx rewrites `</head>` to add an inline config + the script
+# tag. Upstream Accept-Encoding is cleared on those locations so the
+# response is plain HTML for sub_filter to operate on.
+
+{% set topbar_config = {'hostnames': hostnames, 'mode': network.mode} | to_json %}
+{# topbar.js is served same-origin from every kiwix vhost (via the
+   alias below). Kiwix sets a CSP that blocks cross-origin scripts;
+   inline scripts pass thanks to its 'unsafe-inline'. #}
 
 # Default server — sinkhole for any unrecognised Host header.
 server {
@@ -83,6 +96,14 @@ server {
         return 302 {{ book_path }};
     }
 
+    # Treehouse top bar served same-origin so kiwix's CSP allows it.
+    # The file lives in the launcher build dir; we just alias it.
+    location = /topbar.js {
+        alias {{ treehouse_root }}/launcher/topbar.js;
+        types { application/javascript js; }
+        add_header Cache-Control "public, max-age=300";
+    }
+
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_http_version 1.1;
@@ -92,6 +113,16 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
         # Kiwix can be slow on first ZIM read; tolerate it.
         proxy_read_timeout 60s;
+
+        # Treehouse top bar — inject shared search/quicklinks into every
+        # kiwix HTML response. Clear Accept-Encoding so kiwix sends plain
+        # text/html (sub_filter can't operate on gzipped bodies). Script
+        # is loaded from the same vhost via the /topbar.js alias above
+        # so kiwix's CSP (which forbids cross-origin scripts) accepts it.
+        proxy_set_header Accept-Encoding "";
+        sub_filter_once on;
+        sub_filter_types text/html;
+        sub_filter '</head>' '<script>window.__TREEHOUSE_TOPBAR__={{ topbar_config }};</script><script src="/topbar.js" defer></script></head>';
     }
 }
 
