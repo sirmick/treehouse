@@ -7,3 +7,7 @@ pydantic>=2.5
 # will be added when the AI gateway lands.
 libzim>=3
 meilisearch>=0.31
+
+# Browser-driven e2e (tests/test_e2e.py). The actual browser binary
+# is fetched separately: `.venv/bin/playwright install chromium`.
+pytest-playwright>=0.5
