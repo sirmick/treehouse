@@ -32,17 +32,17 @@ NET_XML="$REPO_ROOT/ansible/files/br-kids.xml"
 NETWORK_MODE="$("$REPO_ROOT/bin/cfg" network.mode)"
 case "$NETWORK_MODE" in
   isolated)
-    KIDS_NIC_ARG="network=$("$REPO_ROOT/bin/cfg" network.isolated.bridge),model=virtio"
+    LIBVIRT_NET="$("$REPO_ROOT/bin/cfg" network.isolated.bridge)"   # 'br-kids'
     ;;
   lan)
-    LAN_IFACE="$("$REPO_ROOT/bin/cfg" network.lan.host_iface)"
-    KIDS_NIC_ARG="type=direct,source=${LAN_IFACE},source.mode=bridge,model=virtio"
+    LIBVIRT_NET="$("$REPO_ROOT/bin/cfg" network.lan.libvirt_net)"   # 'lan' → br-lan
     ;;
   *)
     echo "unknown network.mode in treehouse.yml: '$NETWORK_MODE' (expected: isolated | lan)" >&2
     exit 1
     ;;
 esac
+KIDS_NIC_ARG="network=${LIBVIRT_NET},model=virtio"
 
 if [[ ! -d "$STORAGE" || ! -w "$STORAGE" ]]; then
   echo "missing or unwritable: $STORAGE" >&2
@@ -61,24 +61,32 @@ need qemu-img
 need genisoimage 2>/dev/null || need mkisofs
 
 # ----- libvirt network ------------------------------------------------------
-# Only the isolated mode uses libvirt's br-kids network. In lan mode the
-# second NIC is a macvtap child of a host interface — no libvirt network
-# object needed.
+# isolated mode → libvirt-managed br-kids (defined inline if missing).
+# lan mode      → host-managed br-lan, exposed via the libvirt 'lan' network
+#                 in bridge forward mode. The bridge + libvirt 'lan' network
+#                 are one-time host setup; see docs/network.md.
 if [[ "$NETWORK_MODE" == "isolated" ]]; then
-  if ! virsh net-info br-kids >/dev/null 2>&1; then
-    log "defining br-kids libvirt network"
+  if ! virsh net-info "$LIBVIRT_NET" >/dev/null 2>&1; then
+    log "defining $LIBVIRT_NET libvirt network"
     virsh net-define "$NET_XML"
-    virsh net-autostart br-kids
-    virsh net-start br-kids
+    virsh net-autostart "$LIBVIRT_NET"
+    virsh net-start "$LIBVIRT_NET"
   else
-    log "br-kids network already defined"
+    log "$LIBVIRT_NET network already defined"
     # grep without -q so virsh can finish writing — under `set -o pipefail`,
     # `grep -q` matches early, closes stdin, and virsh dies with SIGPIPE,
     # making the pipeline look failed even when Active: yes.
-    virsh net-info br-kids | grep 'Active:.*yes' >/dev/null || virsh net-start br-kids
+    virsh net-info "$LIBVIRT_NET" | grep 'Active:.*yes' >/dev/null || virsh net-start "$LIBVIRT_NET"
   fi
 else
-  log "network.mode=lan — skipping br-kids; second NIC will macvtap-bridge to ${LAN_IFACE}"
+  if ! virsh net-info "$LIBVIRT_NET" >/dev/null 2>&1; then
+    echo "lan-mode requires libvirt network '$LIBVIRT_NET' to be pre-defined" >&2
+    echo "  one-time host setup: virsh net-define ansible/files/lan-net.xml" >&2
+    echo "                       virsh net-autostart $LIBVIRT_NET" >&2
+    echo "                       virsh net-start $LIBVIRT_NET" >&2
+    exit 1
+  fi
+  virsh net-info "$LIBVIRT_NET" | grep 'Active:.*yes' >/dev/null || virsh net-start "$LIBVIRT_NET"
 fi
 
 # ----- base image -----------------------------------------------------------
@@ -185,10 +193,10 @@ else
 fi
 
 # ----- wait for qemu-guest-agent --------------------------------------------
-# Single-NIC VMs have no laptop-reachable IP (kids segment is isolated
-# in `isolated` mode; macvtap blocks the host in `lan` mode). The way
-# in is the guest agent over virtio-serial. Cloud-init installs +
-# starts qemu-guest-agent; we just poll until it answers.
+# The guest agent is the only way in before cloud-init finishes, regardless
+# of mode (isolated has no host-side IP at all; lan needs the guest to
+# bring up its static IP first). Cloud-init installs + starts
+# qemu-guest-agent; we just poll until it answers.
 log "waiting for qemu-guest-agent..."
 for _ in $(seq 1 90); do
   if virsh qemu-agent-command "$NAME" '{"execute":"guest-ping"}' >/dev/null 2>&1; then

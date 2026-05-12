@@ -118,7 +118,7 @@ test-schemas:              ## Round-trip manifest/kids schemas
 test-compose:              ## Spin up kiwix in compose, run kiwix + adapter + provisioner tests
 	.venv/bin/python -m pytest tests/test_compose.py tests/test_adapters.py tests/test_provisioner.py -v
 
-test-live:                 ## Hit the deployed VM via SSH local-forward to 10.10.10.1:80
+test-live:                 ## Hit the deployed VM directly (lan mode); guidance for isolated
 	bin/test-live.sh
 
 test-all:                  ## All suites (schemas + compose + live)

@@ -1,0 +1,17 @@
+<!--
+  Libvirt network for the home LAN.
+
+  - bridge forward mode: VM NICs plug directly into the host-managed
+    Linux bridge `br-lan` (defined out-of-band via netplan, see
+    docs/network.md). VMs get a real LAN IP and can be reached by
+    other devices on the LAN; host↔VM also works (unlike macvtap).
+  - no <ip>, no <forward><nat>: libvirt does not run dnsmasq or NAT
+    here. The LAN's existing DHCP / resolver is authoritative.
+  - host-managed bridge: libvirt does not create or own br-lan; it
+    must already exist on the host before this network is started.
+-->
+<network>
+  <name>lan</name>
+  <forward mode='bridge'/>
+  <bridge name='br-lan'/>
+</network>

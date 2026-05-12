@@ -18,17 +18,19 @@
 # (LAN IPs, public domain) stay out of the committed history.
 
 network:
-  # mode = isolated: second NIC on libvirt's br-kids (no DHCP from LAN,
+  # mode = isolated: VM NIC on libvirt's br-kids (no DHCP from LAN,
   #                  dnsmasq inside the VM serves DHCP+DNS for the kids
   #                  segment on `isolated.subnet`). `make verify-isolation`
   #                  is meaningful in this mode.
-  # mode = lan:      second NIC macvtap-bridged onto the host's LAN NIC.
-  #                  The VM gets a static IP on the LAN; LAN devices
-  #                  (e.g. an upstream reverse proxy) can reach it.
-  #                  dnsmasq is disabled — the LAN's existing resolver
-  #                  is used. Trade: no structural isolation, so
-  #                  `verify-isolation` no longer applies and is gated
-  #                  off in this mode.
+  # mode = lan:      VM NIC on libvirt's `lan` network, which bridge-forwards
+  #                  onto a host-managed Linux bridge (br-lan) spanning the
+  #                  host's physical NICs. The VM gets a static IP on the
+  #                  LAN; LAN devices (e.g. an upstream reverse proxy) can
+  #                  reach it, and host↔VM connectivity works. dnsmasq is
+  #                  disabled — the LAN's existing resolver is used. Trade:
+  #                  no structural isolation, so `verify-isolation` is
+  #                  gated off in this mode. One-time host setup
+  #                  (br-lan + libvirt `lan` net) is in docs/network.md.
   mode: isolated
 
   isolated:
@@ -40,8 +42,7 @@ network:
     bridge:     br-kids        # libvirt network name
 
   lan:
-    # Host NIC to macvtap-bridge onto. Override per laptop.
-    host_iface: enp3s0
+    libvirt_net: lan            # libvirt network (bridge-mode onto host br-lan)
     # Placeholder values — TEST-NET-1 (RFC 5737, safe for examples).
     # Set these to your LAN's actual subnet before flipping mode to
     # `lan`.

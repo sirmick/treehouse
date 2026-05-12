@@ -1,33 +1,45 @@
 #!/usr/bin/env bash
 # Run tests/test_live.py against the kids segment.
 #
-# Single-NIC architecture: the laptop hosting the VM can't reach the
-# VM's kids IP directly (macvtap-host isolation in lan mode; isolated
-# br-kids has no host-side IP). The earlier SSH-local-forward path
-# went via the mgmt NIC, which no longer exists.
+# Reachability depends on network.mode:
 #
-# Three remaining options for actually running this:
-#
-# 1. From any other device on the LAN (a phone in `vm` mode, your
-#    other laptop, the proxy box) — set TREEHOUSE_HOST to the VM's
-#    LAN IP and run `python -m pytest tests/test_live.py` there.
-#
-# 2. From inside the VM via qemu-ga — invoking pytest VM-side is a
-#    follow-up slice (needs pytest + requests installed there).
-#
-# 3. Through the public path — set TREEHOUSE_HOST=<public-name>:443
-#    (the public hostname from treehouse.yml that your reverse proxy
-#    fronts the VM under) plus a small change to test_live.py to use
-#    https://. Slow because it goes out to the internet and back.
+#   lan      — VM is on the LAN via libvirt's 'lan' network, bridged onto
+#              the host's br-lan. Laptop and VM share L2, so pytest runs
+#              directly from here pointed at network.lan.ip.
+#   isolated — VM only reachable from the kids' AP (or via qemu-ga over
+#              virtio-serial, which doesn't help HTTP probes). pytest from
+#              this laptop isn't possible; we exit with guidance instead.
 
 set -euo pipefail
 
-cat <<EOF >&2
-[test-live] cannot run from this laptop in single-NIC mode.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MODE="$("$REPO_ROOT/bin/cfg" network.mode)"
 
-  Run from any other LAN device:
-    TREEHOUSE_HOST=$(./bin/cfg network.lan.ip | cut -d/ -f1) \\
+case "$MODE" in
+  lan)
+    VM_IP="$("$REPO_ROOT/bin/cfg" network.lan.ip | cut -d/ -f1)"
+    export TREEHOUSE_HOST="$VM_IP"
+    # Match the other test targets: use the repo's .venv (created by
+    # `make test-deps`). Fall back to system python3 if the venv isn't
+    # set up yet, so the failure mode is a clearer pytest-not-found.
+    PY="$REPO_ROOT/.venv/bin/python"
+    [[ -x "$PY" ]] || PY=python3
+    exec "$PY" -m pytest "$REPO_ROOT/tests/test_live.py" -v
+    ;;
+  isolated)
+    cat >&2 <<EOF
+[test-live] isolated-mode VMs aren't reachable from this laptop.
+
+  Run from a device on the kids' AP (tablet, phone, AP shell):
+    TREEHOUSE_HOST=$("$REPO_ROOT/bin/cfg" network.isolated.host_ip) \\
       python -m pytest tests/test_live.py -v
 
+  Or use bin/verify-isolation-via-tablet.sh for the verification probe.
 EOF
-exit 2
+    exit 2
+    ;;
+  *)
+    echo "[test-live] unknown network.mode: '$MODE'" >&2
+    exit 2
+    ;;
+esac

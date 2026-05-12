@@ -1,11 +1,12 @@
 """Tests against the deployed VM stack: nginx + dnsmasq + kiwix.
 
-These run from the laptop. 10.10.10.1 lives on the VM's kids NIC,
-which is libvirt-isolated and unreachable from the host — so
-`bin/test-live.sh` (or `make test-live`) sets up an SSH local-forward
-through the management interface and points TREEHOUSE_HOST at
-127.0.0.1:18080. The HTTP requests originate inside the VM, where
-10.10.10.1 is local.
+These run from the laptop in `lan` mode — the VM sits on the LAN via
+libvirt's `lan` network (bridge-forwarded onto host br-lan), so its
+static IP from treehouse.yml is directly reachable. `bin/test-live.sh`
+(or `make test-live`) reads that IP and points TREEHOUSE_HOST at it.
+
+`isolated` mode isn't laptop-reachable; the wrapper script exits with
+instructions to run from a device on the kids' AP instead.
 
 DNS is bypassed by setting Host: headers explicitly — so these tests
 don't depend on having configured systemd-resolved.
