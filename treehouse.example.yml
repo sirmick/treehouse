@@ -63,7 +63,7 @@ network:
 # Schema per entry:
 #   internal: <name>.kids                     # stable internal name
 #   public:   <name>-kids.<your-domain>       # public alias
-#   serves:   launcher | kiwix                # which backend
+#   serves:   launcher | kiwix | calibre      # which backend
 #   landing:  /search | /maps  (optional)     # serves:launcher only —
 #                                             #   redirect / here
 #   book:     wikipedia | wiktionary | vikidia (optional)
@@ -109,3 +109,7 @@ hostnames:
     public:   vikidia-kids.example.com
     serves:   kiwix
     book:     vikidia
+  books:
+    internal: books.kids
+    public:   books-kids.example.com
+    serves:   calibre

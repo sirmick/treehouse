@@ -50,6 +50,44 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # calibre-web reads the calibre library at /books and serves it as a
+  # browse + read web UI. We don't import books from here — calibre-web
+  # is read-only-ish for library structure. The seed playbook
+  # (ansible/seed-books.yml) runs a one-shot `linuxserver/calibre`
+  # sidecar to do `calibredb add`, then this container picks up the
+  # results from the shared bind mount.
+  calibre-web:
+    image: lscr.io/linuxserver/calibre-web:0.6.24
+    container_name: treehouse-calibre-web
+    restart: unless-stopped
+    ports:
+      # Loopback only — host nginx forwards books-kids.* here.
+      - "127.0.0.1:8083:8083"
+    volumes:
+      - ./state/calibre-config:/config
+      - ./content/books/library:/books
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      # Tells calibre-web where the library lives on first boot. After
+      # that the path is persisted in /config/app.db and this env var
+      # has no further effect — handy because we can wipe state/
+      # calibre-config and re-bootstrap from scratch.
+      DOCKER_MODS: ""
+    networks: [treehouse-net]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8083/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   meilisearch:
     image: getmeili/meilisearch:v1.13
     container_name: treehouse-meili

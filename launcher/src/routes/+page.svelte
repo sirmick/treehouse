@@ -13,6 +13,7 @@
 		{ label: 'Maps', emoji: '🗺️', href: `http://${activeHost('maps')}/` },
 		{ label: 'Dictionary', emoji: '📖', href: `http://${activeHost('dictionary')}/` },
 		{ label: 'Vikidia', emoji: '🌱', href: `http://${activeHost('vikidia')}/` },
+		{ label: 'Books', emoji: '📕', href: `http://${activeHost('books')}/` },
 		{ label: 'Videos', emoji: '🎬' },
 		{ label: 'Khan Academy', emoji: '🎓' },
 		{ label: 'Play', emoji: '🎨' },

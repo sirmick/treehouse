@@ -25,10 +25,14 @@
 
   // Aesthetic choices live here; the host map comes from cfg. Each
   // entry must reference an id present in treehouse.yml hostnames.
+  // Entries whose id isn't in cfg.hostnames are skipped at render
+  // time (so a fresh-clone deploy without `books` still renders the
+  // rest cleanly).
   const QUICKLINKS = [
     { id: "wikipedia", emoji: "📚", label: "Wikipedia" },
     { id: "dictionary", emoji: "📖", label: "Dictionary" },
     { id: "vikidia", emoji: "🌱", label: "Vikidia" },
+    { id: "books", emoji: "📕", label: "Books" },
     { id: "maps", emoji: "🗺️", label: "Maps" },
   ];
 

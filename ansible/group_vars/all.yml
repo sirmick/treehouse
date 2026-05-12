@@ -34,6 +34,12 @@ treehouse_paths:
   - "{{ treehouse_root }}/content"
   - "{{ treehouse_root }}/content/zims"
   - "{{ treehouse_root }}/content/maps"
+  # calibre-web's two volumes: config (small SQLite app.db etc.) and
+  # the library (calibre's metadata.db + per-book folders). Inbox is
+  # ephemeral staging that the seed playbook creates as needed.
+  - "{{ treehouse_root }}/state/calibre-config"
+  - "{{ treehouse_root }}/content/books"
+  - "{{ treehouse_root }}/content/books/library"
   # launcher/ is created + owned by the proxy role as www-data, since
   # nginx serves it. Keep it out of base/ to avoid an ownership tug-of-war.
   - "{{ treehouse_root }}/logs"
