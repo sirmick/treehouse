@@ -13,16 +13,17 @@
 	};
 
 	// Source → display label + emoji + which kids hostname routes
-	// clicks for it. Each kiwix-served source has its own FQDN now,
-	// so search-result links land on the right "app" host instead
-	// of cross-host into the Wikipedia FQDN.
+	// clicks for it. Each content service has its own FQDN, so
+	// search-result links land on the right "app" host instead of
+	// cross-host into the wrong one.
 	const SOURCE_META: Record<
 		string,
 		{ label: string; emoji: string; host: keyof typeof hostnames }
 	> = {
 		wikipedia: { label: 'Wikipedia', emoji: '📚', host: 'wikipedia' },
 		wiktionary: { label: 'Wiktionary', emoji: '📖', host: 'dictionary' },
-		vikidia: { label: 'Vikidia', emoji: '🌱', host: 'vikidia' }
+		vikidia: { label: 'Vikidia', emoji: '🌱', host: 'vikidia' },
+		book: { label: 'Books', emoji: '📕', host: 'books' }
 	};
 
 	let query = $state('');
@@ -45,15 +46,32 @@
 		busy = true;
 		error = null;
 		lastQuery = q;
+		// Per-source parallel queries, then interleave. A single query
+		// across the whole index lets Wikipedia (970k chunks) drown out
+		// the smaller sources — books and Vikidia would never surface
+		// for a generic term. 5 hits per source × 4 sources = 20 hits.
+		const sources = Object.keys(SOURCE_META);
+		const perSource = 5;
 		try {
-			const r = await fetch('/api/search', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ q, limit: 20 })
-			});
-			if (!r.ok) throw new Error(`search failed: ${r.status}`);
-			const data = await r.json();
-			hits = (data.hits ?? []) as Hit[];
+			const responses = await Promise.all(
+				sources.map((src) =>
+					fetch('/api/search', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ q, filter: `source = ${src}`, limit: perSource })
+					}).then((r) => (r.ok ? r.json() : { hits: [] }))
+				)
+			);
+			// Interleave: rank-1 from every source, then rank-2 from every
+			// source, etc. Sources with no hits drop out naturally.
+			const merged: Hit[] = [];
+			for (let i = 0; i < perSource; i++) {
+				for (const data of responses) {
+					const hit = (data.hits ?? [])[i];
+					if (hit) merged.push(hit as Hit);
+				}
+			}
+			hits = merged;
 		} catch (err) {
 			error = err instanceof Error ? err.message : String(err);
 			hits = [];
@@ -63,12 +81,16 @@
 	}
 
 	function urlFor(hit: Hit): string {
-		// Each source routes through its own FQDN (wiki-kids,
-		// dictionary-kids, vikidia-kids). Sources we don't know fall
-		// back to the wikipedia FQDN as a best effort.
-		if (!hit.deeplink_book || !hit.deeplink_path) return '#';
+		// Each source routes through its own FQDN. Books use calibre-web's
+		// own search-results page (matches by title — calibre's book IDs
+		// aren't in the ingest path); everything else is kiwix content.
 		const meta = SOURCE_META[hit.source];
 		const host = activeHost(meta?.host ?? 'wikipedia');
+		if (hit.source === 'book') {
+			if (!hit.deeplink_path) return '#';
+			return `http://${host}/search/stored/?query=${encodeURIComponent(hit.deeplink_path)}`;
+		}
+		if (!hit.deeplink_book || !hit.deeplink_path) return '#';
 		return `http://${host}/content/${hit.deeplink_book}/${hit.deeplink_path}`;
 	}
 

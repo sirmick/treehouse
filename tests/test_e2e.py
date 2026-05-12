@@ -275,3 +275,25 @@ def test_search_returns_hits(page: Any, config: dict[str, Any]) -> None:
     )
     hit_count = page.locator("ul li a").count()
     assert hit_count > 0, "expected at least one search hit for 'banana'"
+
+
+def test_search_returns_book_hits(page: Any, config: dict[str, Any]) -> None:
+    """Books (Gutenberg via Gutendex, indexed by ingest_books.py) surface
+    in /search alongside Wikipedia. The deeplink for a book points at
+    calibre-web's search-results page (no Gutenberg→calibre ID mapping
+    in the ingest path), so we just verify a hit comes back with
+    source=book and the link points at the books FQDN."""
+    search = _public(config, "search")
+    books_host = _public(config, "books")
+    page.goto(f"https://{search}/search?q=alice", wait_until="networkidle", timeout=20_000)
+    page.wait_for_function(
+        "() => document.querySelectorAll('ul li a').length > 0",
+        timeout=15_000,
+    )
+    # Find the first hit linked to the books FQDN.
+    book_link = page.locator(f"ul li a[href*='{books_host}']").first
+    href = book_link.get_attribute("href")
+    assert href and "/search/stored/?query=" in href, (
+        f"expected a book hit linking to calibre-web search; got href={href!r}. "
+        "Either ingest_books.py hasn't run, or urlFor() in /search regressed."
+    )

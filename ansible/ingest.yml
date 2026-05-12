@@ -42,13 +42,16 @@
         group: "{{ treehouse_group }}"
         mode: "0755"
 
-    - name: Copy ingestor script
+    - name: Copy ingestor scripts
       ansible.builtin.copy:
-        src: "{{ playbook_dir }}/../treehouse/searchd/ingest_kiwix.py"
-        dest: "{{ searchd_dir }}/ingest_kiwix.py"
+        src: "{{ playbook_dir }}/../treehouse/searchd/{{ item }}"
+        dest: "{{ searchd_dir }}/{{ item }}"
         owner: "{{ treehouse_user }}"
         group: "{{ treehouse_group }}"
         mode: "0644"
+      loop:
+        - ingest_kiwix.py
+        - ingest_books.py
 
     - name: Create venv (idempotent)
       ansible.builtin.command:
@@ -72,4 +75,23 @@
           --meili-url http://127.0.0.1:7700
           --index treehouse
       loop: "{{ zims }}"
+      changed_when: true
+
+    # Books are ingested from the manifest that seed-books.yml writes.
+    # No-op if seed-books hasn't run yet (manifest missing → ingestor
+    # exits with rc 1; we tolerate that so a books-less deployment
+    # doesn't break `make ingest`).
+    - name: Check whether the books manifest exists
+      ansible.builtin.stat:
+        path: "{{ treehouse_root }}/state/books-manifest.jsonl"
+      register: books_manifest
+
+    - name: Index books into MeiliSearch
+      when: books_manifest.stat.exists
+      ansible.builtin.command:
+        cmd: >-
+          {{ venv_dir }}/bin/python {{ searchd_dir }}/ingest_books.py
+          --manifest {{ treehouse_root }}/state/books-manifest.jsonl
+          --meili-url http://127.0.0.1:7700
+          --index treehouse
       changed_when: true
