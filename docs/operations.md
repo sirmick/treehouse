@@ -111,12 +111,12 @@ Roles: `base` → `network` → `proxy` → `docker` → `treehouse-services`
 `changed=0`.
 
 The `network` role is the dangerous one: it installs nftables with a
-default-drop input policy, and the SSH carve-out is keyed off the
-detected management interface name. Interface names are discovered via
-ansible facts (`ansible_default_ipv4.interface`), so any naming policy
-works (`enpXsY`, `ethN`, etc.) — but if facts ever return something
-unexpected, expect to lose SSH and recover from the file-backed serial
-console.
+default-drop input policy. With the single-NIC VM the SSH carve-out is
+keyed off the same interface as the kids segment (no separate mgmt NIC
+post-`6d402c3`); interface names are discovered via ansible facts
+(`ansible_facts.interfaces` filtered for `^(en|eth)`). If facts ever
+return something unexpected, expect to lose SSH and recover from the
+file-backed serial console or via qemu-guest-agent.
 
 ### 5. Seed content
 
@@ -340,36 +340,27 @@ or anything in PID 1 changed.
 A "maintenance window" is operationally:
 
 ```
-make unseal           # bring up management interface
 make backup           # snapshot before changes
-# ... do work ...
+# ... do work via `make provision` / qemu-ga shell ...
 make health           # verify everything still healthy
-make seal             # bring management interface down
+make verify-isolation # in isolated mode: confirm the gate still holds
 ```
 
-`unseal` raises the management interface and adds a default route
-for the host (not the kids segment). Internet reachable from the
-host. **The kids' segment remains isolated** because the nftables
-forward `drop` rule still applies, and the kids' segment still has
-no default route in its DHCP config.
-
-`seal` reverses: brings management down, removes the host's default
-route, leaves only the kids segment. The host can no longer reach
-anything; only inbound traffic from the kids' segment is accepted.
-
-After each `seal`, run a verification ritual:
+The single-NIC shape (post-`6d402c3`) removed the separate management
+interface that earlier versions of this doc described — the box's
+control plane is qemu-guest-agent over virtio-serial, not a TCP
+admin port. There's no host-side default route to "seal off" in
+isolated mode; the kids segment is already the only attached
+network. `verify-isolation` is the source of truth — let it tell
+you the state is clean.
 
 ```
 make verify-isolation
 # Expected output:
 #   ✓ no default route on kids segment
 #   ✓ nftables forward policy drop, kids→* drop rule present
-#   ✓ management interface down
 #   ✓ no DNS resolution to public IPs from a test client
 ```
-
-Don't trust "I remember running unseal" — let the verification
-script tell you the state is clean.
 
 ## NTP without internet
 
@@ -521,7 +512,8 @@ Set a recurring calendar event:
 
 - [ ] Run `make restore-drill`. Verify it passed. File the report.
 - [ ] Review container image versions for upstream updates.
-- [ ] Patch host: `make unseal && apt upgrade && reboot && make seal`.
+- [ ] Patch host: `make provision` (or apt upgrade via the qemu-ga shell)
+      and reboot; rerun `make verify-isolation` after.
 - [ ] Spot-check the AI transcript log for unexpected patterns.
 - [ ] Curation review: prune YouTube channels she's outgrown; add
       what's been showing up in search misses.
@@ -539,10 +531,10 @@ Set a recurring calendar event:
 ## Open questions
 
 - **Should there be off-site backup?** A second restic remote on a
-  cloud bucket. Adds complexity (the management interface needs to
-  be unsealed for restic to push); buys disaster resilience (house
-  fire, drive failure on backup drive). Reasonable for v2;
-  not blocker for v1.
+  cloud bucket. Adds complexity (the box would need outbound to the
+  bucket — needs a separate egress path that doesn't break isolation
+  for the kids segment); buys disaster resilience (house fire, drive
+  failure on backup drive). Reasonable for v2; not blocker for v1.
 - **Should the system page Mick on failures?** A push notification
   when an adapter goes red, when the update report shows errors.
   Requires upstream connectivity (or an out-of-band mechanism).

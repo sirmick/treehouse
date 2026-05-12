@@ -46,7 +46,8 @@ plumbing in place, ready for content services to drop into.
 - `curl -H 'Host: home.kids' http://10.10.10.1/` from inside the VM
   hits the nginx placeholder.
 - `ip route` on the box has no default route to the public internet
-  (or the route exists only on a separate management interface).
+  (single-NIC isolated mode: the kids segment is the only NIC, and
+  its DHCP config has no gateway).
 - `make verify-isolation` exits 0.
 - `make restore-drill` completes the backup → restore round-trip.
   Proves backup works *before* there's anything precious to back up.

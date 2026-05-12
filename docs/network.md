@@ -42,29 +42,22 @@ and how the experience travels.
    │   │  Provides: DHCP, DNS, all services  │                  │
    │   │  Default route on this interface:   │                  │
    │   │    *** none ***                     │                  │
+   │   │  Control plane: qemu-guest-agent    │                  │
+   │   │    over virtio-serial (no network)  │                  │
    │   └─────────────────────────────────────┘                  │
    │                                                            │
    └────────────────────────────────────────────────────────────┘
-
-   ┌────────────────────────────────────────────────────────────┐
-   │  MANAGEMENT (sealed off in production)                     │
-   │                                                            │
-   │   [Mick's workstation] ── ssh ─► host's mgmt iface         │
-   │                                  (different physical port  │
-   │                                  / different VLAN)         │
-   │                                                            │
-   │   This interface is only enabled during `make unseal`      │
-   │   maintenance windows. Normal operation: down.             │
-   └────────────────────────────────────────────────────────────┘
 ```
 
-The host has two network interfaces:
+The VM has a single NIC on the kids' segment:
 
-- **`br-kids` (10.10.10.1/24)** — bridged to the AP's LAN. dnsmasq listens
-  here, all services bind here. **No default route on this interface.**
-- **management interface** — separate physical port (or VLAN) used only
-  for ssh administration. Toggled off via `make seal` for production
-  operation.
+- **`br-kids` (10.10.10.1/24)** — libvirt-isolated bridge, no upstream
+  and no NAT. dnsmasq listens here, all services bind here. **No default
+  route.**
+- Control plane is qemu-guest-agent over virtio-serial — Ansible drives
+  the box via the guest agent, no SSH-over-network needed. This removes
+  the old separate "management interface" from the topology: there's
+  one NIC and it stays on the kids' segment.
 
 ## Physical AP
 
@@ -225,8 +218,11 @@ table inet kids {
         iifname "br-kids" tcp dport { 53, 80, 443, 67, 68 } accept
         iifname "br-kids" udp dport { 53, 67, 68, 123 } accept
 
-        # Management interface: ssh only, when up
-        iifname "mgmt0" tcp dport 22 accept
+        # SSH carve-out, single-NIC: SSH is reached over the same iface
+        # since there's no separate mgmt port. In isolated mode this means
+        # kids' devices could in principle hit sshd; rely on sshd config
+        # (PermitRootLogin no, key-only auth) for that, not nftables.
+        iifname "br-kids" tcp dport 22 accept
     }
 }
 ```
@@ -236,9 +232,9 @@ The forward chain is the critical one: `policy drop` plus an explicit
 appears on the host, packets from the kids' segment are still discarded
 before being forwarded.
 
-The host has its own outbound access (when management is up) for
-package updates and content downloads. The drop rule only applies to
-*forwarding*, not to the host's own outbound.
+The host has its own outbound access for package updates and content
+downloads. The drop rule only applies to *forwarding*, not to the host's
+own outbound.
 
 ## nginx — the single user-facing port
 
@@ -378,8 +374,11 @@ family-sized homes do fine with one or two GL.iNets.
   this is a family-of-few network and contention is unlikely. Mention
   for completeness; revisit if PeerTube transcoding ever bogs down a
   kid's stream.
-- **What happens when management interface is up?** Strictly: a route
-  to the public internet exists on the host, but not on the kids'
-  segment. The nftables forward `drop` rule prevents leakage. Document
-  the verification ritual after each `unseal`/`seal` cycle in
-  `operations.md`.
+- **Should the production deployment reintroduce a separate management
+  NIC?** The single-NIC + qemu-guest-agent shape is simple and works
+  for the dev VM, but a real Pi deployment may want a physically
+  separate admin port that's only on during maintenance windows. If
+  so, the ansible network role would need a `mgmt_iface` variable
+  back (it was removed when the dev VM collapsed to single-NIC) plus
+  a corresponding nftables carve-out. Revisit when the Pi deployment
+  lands.

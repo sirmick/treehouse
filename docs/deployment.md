@@ -81,17 +81,16 @@ What it sets up:
 - Debian 12 generic-cloud image, cached at
   `/var/lib/libvirt/images/treehouse/debian-12-genericcloud-amd64.qcow2`.
 - 40 GB system disk + 200 GB sparse content disk (qcow2 overlays).
-- Two NICs:
-  - **Management:** libvirt's `default` NAT network. Auto-DHCP'd to
-    `192.168.122.x`. This is how the laptop reaches the VM via SSH +
-    Ansible.
-  - **Kids segment:** depends on `network.mode` in `treehouse.yml`:
-    - `isolated` (the default) — libvirt's `br-kids` network, an
-      isolated bridge with no upstream and no NAT. The VM's dnsmasq
-      serves DHCP/DNS on `10.10.10.0/24`.
-    - `lan` — macvtap-bridged onto the host's LAN NIC. The VM gets
-      a static IP on the LAN; LAN devices reach it directly. dnsmasq
-      is disabled in this mode.
+- Single NIC, mode-dependent:
+  - `isolated` (the default) — libvirt's `br-kids` network, an
+    isolated bridge with no upstream and no NAT. The VM's dnsmasq
+    serves DHCP/DNS on `10.10.10.0/24`. The laptop reaches the VM
+    via qemu-guest-agent over virtio-serial, not over the network.
+  - `lan` — libvirt's `lan` network, which bridge-forwards onto the
+    host-managed `br-lan` (a Linux bridge spanning the host's
+    physical NICs). The VM gets a static IP on the LAN; LAN devices
+    reach it directly, and host↔VM works. dnsmasq is disabled in
+    this mode. One-time host setup is in `network.md`.
 - Cloud-init seeds the SSH key (auto-detected from `~/.ssh/`) so the
   laptop can `ssh mick@<vm>` without a password.
 
@@ -376,8 +375,6 @@ The migration runbook (in `docs/operations.md`) is:
 make up              # libvirt VM up + cloud-init seed
 make down            # tear down the VM (base image kept for next up)
 make provision       # rerun ansible against existing VM
-make seal            # disable management interface (production-only)
-make unseal          # re-enable management interface (maintenance)
 make compose         # docker compose up -d on the box
 make logs            # tail aggregated container logs
 make health          # poll every adapter's health(), color-coded
