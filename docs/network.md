@@ -363,6 +363,76 @@ dedicated controller is more capable but introduces enough complexity
 that it's worth thinking carefully about whether it's needed. Most
 family-sized homes do fine with one or two GL.iNets.
 
+## Lan-mode setup (alternate)
+
+For development and pre-production testing, `network.mode: lan` puts
+the VM directly on the home LAN. The kids' AP isolation guarantees
+above no longer apply — `make verify-isolation` is gated off in this
+mode. The tradeoff buys host↔VM connectivity (which macvtap forbids)
+and easy reverse-proxy fronting from another box on the LAN.
+
+### Host bridge
+
+The lan-mode VM attaches to a libvirt 'bridge'-forward network named
+`lan`, which sits on top of a host-managed Linux bridge `br-lan`. The
+bridge spans the host's physical NICs so the cable can move between
+ports without reconfiguration; STP keeps accidental loops down.
+
+One-time host setup. Drop this in `/etc/netplan/02-bridge.yaml`,
+adjusting NIC names to match `ip -br link` and the IP/gateway to
+match your LAN:
+
+```yaml
+network:
+  version: 2
+  renderer: NetworkManager
+  ethernets:
+    enp3s0: { dhcp4: false, dhcp6: false, accept-ra: false, link-local: [] }
+    enp4s0: { dhcp4: false, dhcp6: false, accept-ra: false, link-local: [] }
+    # ...one entry per physical NIC to enslave
+  bridges:
+    br-lan:
+      interfaces: [enp3s0, enp4s0]
+      dhcp4: false
+      dhcp6: false
+      accept-ra: true
+      addresses: [172.16.16.60/24]              # host's static LAN IP
+      routes:
+        - { to: default, via: 172.16.16.1 }
+      nameservers:
+        addresses: [172.16.16.1]
+        search: [home.arpa]
+      parameters: { stp: true, forward-delay: 4 }
+```
+
+Then:
+
+```bash
+sudo install -m 0600 -o root -g root 02-bridge.yaml /etc/netplan/
+# Purge any NM-generated default wired profiles that would compete
+# with the netplan-managed slaves:
+nmcli con delete "Wired connection 1" "Wired connection 2" 2>/dev/null || true
+sudo netplan apply
+ip -br addr show br-lan                          # expect UP + the static IP
+```
+
+### Libvirt 'lan' network
+
+The repo ships `ansible/files/lan-net.xml` — a libvirt network in
+bridge-forward mode pointing at `br-lan`:
+
+```bash
+virsh -c qemu:///system net-define ansible/files/lan-net.xml
+virsh -c qemu:///system net-autostart lan
+virsh -c qemu:///system net-start lan
+```
+
+After that, with `network.mode: lan` in `treehouse.yml`, `make up`
+attaches the VM's NIC to the `lan` network, the VM gets its static
+IP from `network.lan.ip` (ansible's `network` role configures
+`/etc/systemd/network/10-kids.network` inside the guest), and
+`make test-live` probes the VM directly from the laptop.
+
 ## Open questions
 
 - **Should device-MAC-based per-kid identification supplement the

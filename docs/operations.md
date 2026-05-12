@@ -85,27 +85,31 @@ What happens:
 4. Generates a cloud-init NoCloud seed ISO (attached as virtio-blk —
    the cloud kernel has no AHCI driver, so a SATA cdrom would be
    invisible to the guest).
-5. `virt-install --import` boots the VM with two NICs: management on
-   the libvirt `default` net (NAT, gets a DHCP lease around
-   `192.168.122.x`), and isolated on `br-kids`.
-6. Waits ~30 s for cloud-init to settle, then probes SSH.
-7. Writes the dynamic IP into `ansible/inventory/libvirt`.
+5. `virt-install --import` boots the VM with a single NIC attached to
+   the libvirt network for the configured mode — `br-kids` (isolated)
+   or `lan` (lan mode, see `network.md`). Control plane is
+   qemu-guest-agent over virtio-serial, not a network port.
+6. Polls `guest-ping` until qemu-ga responds (cloud-init installs +
+   starts it on first boot, typically ~30–60 s).
 
 The serial console is captured to
 `/var/lib/libvirt/images/treehouse/treehouse-console.log`, owned by
-your user so you can `cat` it without sudo. If `make up` hangs or the
-VM never gets an IP, that file is your first stop.
+your user so you can `cat` it without sudo. If `make up` hangs waiting
+for qemu-ga, that file is your first stop.
 
 ### 4. Provision
 
-Wait until cloud-init has finished its first-boot apt refresh
-(`ssh mick@<ip> 'cloud-init status'` → `done`). Then:
+`make up` returns once qemu-ga answers — that already implies cloud-init
+got far enough to install and start the agent. Then:
 
 ```bash
 make provision
 ```
 
-Runs the Ansible playbook against the inventory written by `make up`.
+Runs the Ansible playbook against `ansible/inventory/libvirt-qemu`, a
+static inventory using the `community.libvirt.libvirt_qemu` connection
+plugin (commands flow through the guest agent over virtio-serial — no
+SSH required).
 Roles: `base` → `network` → `proxy` → `docker` → `treehouse-services`
 → `backup`. Idempotent — re-running on a healthy box should report
 `changed=0`.

@@ -293,10 +293,12 @@ Run only for channels removed from manifest.
 
 **Source caveat:** Kolibri's content packs are downloaded from
 `studio.learningequality.org`. The updater needs upstream network
-access during these calls. This is one of the reasons the management
-interface exists separately — content fetch happens during a
-maintenance window with management up; production runs with management
-sealed.
+access during these calls, which the isolated-mode VM doesn't have.
+Two viable patterns: flip `network.mode` to `lan` for the duration of
+the content fetch (sacrifices structural isolation while running), or
+fetch on a separately-connected machine and rsync the artifacts onto
+the box. A cleaner mechanism — a host-side proxy reachable from the VM
+only during a defined maintenance window — is a future improvement.
 
 ### `osm` — OpenStreetMap regional extracts
 
