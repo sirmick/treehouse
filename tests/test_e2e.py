@@ -219,10 +219,12 @@ def test_map_pins_query_returns_geo_hits(page: Any, config: dict[str, Any]) -> N
     view and renders the results as a pin layer. We don't try to
     inspect MapLibre's GL canvas for circles (no DOM); instead we
     intercept the /api/search response and verify it contains geo'd
-    hits."""
+    hits and that each hit carries a `category` (settlement/landform/
+    etc.) — the latter would silently break if the Meili filter
+    `category IN [...]` regressed."""
     maps = _public(config, "maps")
 
-    geo_hit_count: dict[str, int] = {"n": -1}
+    samples: list[dict[str, Any]] = []
 
     def grab(response: Any) -> None:
         if "/api/search" not in response.url:
@@ -232,18 +234,26 @@ def test_map_pins_query_returns_geo_hits(page: Any, config: dict[str, Any]) -> N
         except Exception:
             return
         hits = body.get("hits") or []
-        with_geo = sum(1 for h in hits if h.get("_geo"))
-        if with_geo > geo_hit_count["n"]:
-            geo_hit_count["n"] = with_geo
+        samples.append({"url": response.url, "hits": hits})
 
     page.on("response", grab)
     page.goto(f"https://{maps}/maps", wait_until="networkidle", timeout=30_000)
     page.wait_for_timeout(2500)
 
-    assert geo_hit_count["n"] >= 1, (
+    # At least one /api/search response captured, and at least one hit
+    # carried both _geo and category.
+    geo_hits = [h for s in samples for h in s["hits"] if h.get("_geo")]
+    assert geo_hits, (
         "no geo'd hits returned from /api/search on /maps. Either the "
         "Wikipedia ingest hasn't tagged any chunk-0 docs with _geo yet, "
         "or the map page isn't issuing the bounding-box query."
+    )
+    cats = {h.get("category") for h in geo_hits}
+    cats.discard(None)
+    assert cats, (
+        "/api/search returned geo'd hits with no `category` field. "
+        "Either ingest needs to be re-run with the typology extractor, "
+        "or the map's `category IN [...]` filter is excluding everything."
     )
 
 

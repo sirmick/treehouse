@@ -19,6 +19,15 @@ Document schema (matches docs/search.md, minus the embedding field):
     _geo              (optional) {lat, lng} — only on chunk 0 of articles
                       whose HTML carries coords. Drives the map's pin
                       layer via Meili's _geoBoundingBox filter.
+    category          one of {settlement, country, landform, water,
+                      structure, event, person, other} — coarse bucket
+                      for map colouring + filter chips.
+    prominence        0-3 article-byte-size tier; 3 = "household name".
+                      Sortable so the map can show the most-notable 100
+                      pins in a viewport instead of random ones.
+    infobox_class     raw MediaWiki infobox classname (e.g. "infobox
+                      ib-settlement vcard") — kept for future
+                      finer-grained slicing without re-ingest.
 
 Wikipedia ZIMs render coords via three redundant markers; Vikidia ZIMs
 ship no coords at all. The extractor takes the first marker it finds:
@@ -134,6 +143,105 @@ def extract_geo(html: str) -> tuple[float, float] | None:
     return None
 
 
+_INFOBOX_RE = re.compile(r'<table[^>]*class="([^"]*infobox[^"]*)"')
+_FIRSTP_RE = re.compile(r"<p[^>]*>(.*?)</p>", re.S)
+_PAREN_RE = re.compile(r"\([^)]*\)")
+_TAG_RE = re.compile(r"<[^>]+>")
+
+# Keyword → category. The match pattern below anchors on "is/was a"
+# (etc.) so we classify articles by what they ARE, not what they
+# mention. Without the anchor an article on the 37th parallel north
+# becomes "water" because its first paragraph names the Atlantic.
+_KEYWORD_TO_CATEGORY: dict[str, str] = {}
+for _kw in (
+    "river stream creek lake sea ocean bay gulf strait fjord reservoir "
+    "waterfall delta estuary lagoon"
+).split():
+    _KEYWORD_TO_CATEGORY[_kw] = "water"
+for _kw in (
+    "mountain peak hill volcano stratovolcano valley plateau cliff cape "
+    "glacier desert island archipelago peninsula cave forest canyon reef"
+).split():
+    _KEYWORD_TO_CATEGORY[_kw] = "landform"
+for _kw in (
+    "bridge tower palace castle monument landmark museum cathedral "
+    "temple church mosque stadium airport skyscraper library university "
+    "fortress"
+).split():
+    _KEYWORD_TO_CATEGORY[_kw] = "structure"
+for _kw in (
+    "battle war treaty festival ceremony massacre expedition earthquake "
+    "eruption disaster uprising revolution"
+).split():
+    _KEYWORD_TO_CATEGORY[_kw] = "event"
+for _kw in "city town village hamlet municipality capital".split():
+    _KEYWORD_TO_CATEGORY[_kw] = "settlement"
+for _kw in "country nation kingdom state province".split():
+    _KEYWORD_TO_CATEGORY[_kw] = "country"
+
+# "X is a Y" / "X was the Y" / "X are one of the most famous Ys" —
+# anchor on a copula + determiner so we classify by article subject,
+# not by any noun mentioned in the lede. The keyword is captured in
+# group 1; trailing 's' is optional so plurals match.
+_LEDE_RE = re.compile(
+    r"\b(?:is|was|are|were)\s+(?:a|an|the|one of(?:\s+the)?)\s+"
+    r"(?:\S+\s+){0,6}?(" + "|".join(sorted(_KEYWORD_TO_CATEGORY, key=len, reverse=True)) + r")s?\b",
+    re.I,
+)
+
+
+def extract_first_paragraph(html: str) -> str:
+    """Plain-text first <p> from a Wikipedia article (parens stripped)."""
+    m = _FIRSTP_RE.search(html)
+    if not m:
+        return ""
+    text = _TAG_RE.sub("", m.group(1))
+    text = _PAREN_RE.sub("", text)
+    return text.lower().strip()
+
+
+def extract_infobox_class(html: str) -> str:
+    m = _INFOBOX_RE.search(html)
+    return m.group(1).strip() if m else ""
+
+
+def classify(infobox_class: str, first_paragraph: str) -> str:
+    """One of: settlement | country | landform | water | structure |
+    event | person | other.
+
+    Infobox classes are the most reliable signal when they're specific
+    (`ib-settlement`, `ib-country`, etc.). Plain `vcard` is a
+    catch-all microformat used on everything from mountains to
+    landmarks, so we fall through to first-paragraph keyword matching
+    anchored on "X is a Y" for the catch-all case."""
+    ic = infobox_class.lower()
+    if "ib-settlement" in ic:
+        return "settlement"
+    if "ib-country" in ic:
+        return "country"
+    if "vevent" in ic:
+        return "event"
+    if "biography" in ic:
+        return "person"
+
+    m = _LEDE_RE.search(first_paragraph)
+    if m:
+        return _KEYWORD_TO_CATEGORY[m.group(1).lower()]
+    return "other"
+
+
+def prominence_tier(byte_size: int) -> int:
+    """0..3 from article HTML size. Used as the "show me the
+    big-deal stuff first" sort key for the map."""
+    if byte_size >= 100_000:
+        return 3
+    if byte_size >= 40_000:
+        return 2
+    if byte_size >= 10_000:
+        return 1
+    return 0
+
+
 def get_book_name(archive: Archive, fallback: str) -> str:
     """Pull the ZIM's Name metadata, fall back to the file stem."""
     try:
@@ -225,10 +333,14 @@ def main() -> int:
     # `_geo` is a Meili-special field for geosearch. Adding it to both
     # filterable and sortable enables `_geoBoundingBox(...)` filters
     # (used by the map's pin layer) and `_geoPoint(...)` sort.
+    # `category` + `prominence` drive the map's per-type layers and
+    # "show me the big-deal stuff first" sort.
     index.update_settings({
         "searchableAttributes": ["title", "body", "snippet"],
-        "filterableAttributes": ["source", "kind", "language", "_geo"],
-        "sortableAttributes": ["indexed_at", "_geo"],
+        "filterableAttributes": [
+            "source", "kind", "language", "_geo", "category", "prominence"
+        ],
+        "sortableAttributes": ["indexed_at", "_geo", "prominence"],
     })
 
     indexed_at = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -261,10 +373,17 @@ def main() -> int:
         if len(text) < 200:
             continue
 
-        # Extract geo from the raw HTML (not the stripped text — the
-        # extractor drops the span markers). Attach to chunk 0 only so
-        # one article = at most one pin on the map.
+        # Extract typology + geo from the raw HTML (not the stripped
+        # text — the extractor drops the marker spans). Geo lands on
+        # chunk 0 only so one article = at most one map pin; category
+        # and prominence are duplicated to every chunk so future
+        # search-side filtering by them works regardless of which
+        # chunk matches.
         geo = extract_geo(html)
+        infobox_class = extract_infobox_class(html)
+        first_p = extract_first_paragraph(html)
+        category = classify(infobox_class, first_p)
+        prominence = prominence_tier(len(html))
         if geo is not None:
             geo_articles += 1
 
@@ -281,6 +400,9 @@ def main() -> int:
                 "deeplink_path": path,
                 "language": "en",
                 "indexed_at": indexed_at,
+                "category": category,
+                "prominence": prominence,
+                "infobox_class": infobox_class,
             }
             if ci == 0 and geo is not None:
                 doc["_geo"] = {"lat": geo[0], "lng": geo[1]}
