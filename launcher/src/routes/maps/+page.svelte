@@ -4,6 +4,7 @@
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { Protocol } from 'pmtiles';
 	import { layers, namedFlavor } from '@protomaps/basemaps';
+	import { activeHost, hostnames } from '$lib/config';
 
 	let container: HTMLDivElement;
 	let tilesMissing = $state(false);
@@ -19,6 +20,27 @@
 	// support is a follow-up; the asset bundle is small (~MB).
 	const GLYPHS = 'https://protomaps.github.io/basemaps-assets/fonts/{fontstack}/{range}.pbf';
 	const SPRITE = 'https://protomaps.github.io/basemaps-assets/sprites/v4/light';
+
+	// Source id → kiwix vhost id in `hostnames`. Mirrors the table in
+	// /search; lifted out so pin clicks navigate to the right FQDN.
+	const SOURCE_HOST: Record<string, keyof typeof hostnames> = {
+		wikipedia: 'wikipedia',
+		wiktionary: 'dictionary',
+		vikidia: 'vikidia'
+	};
+
+	type GeoHit = {
+		title: string;
+		source: string;
+		deeplink_book: string;
+		deeplink_path: string;
+		_geo: { lat: number; lng: number };
+	};
+
+	function articleUrl(hit: GeoHit): string {
+		const host = activeHost(SOURCE_HOST[hit.source] ?? 'wikipedia');
+		return `https://${host}/content/${hit.deeplink_book}/${hit.deeplink_path}`;
+	}
 
 	onMount(() => {
 		const protocol = new Protocol();
@@ -55,6 +77,108 @@
 		map.on('error', (e) => {
 			const status = (e.error as { status?: number } | undefined)?.status;
 			if (status === 404) tilesMissing = true;
+		});
+
+		// --- Article pins layer ----------------------------------------
+		// Each geocoded article in MeiliSearch (those with a `_geo` field —
+		// chunk 0 only, per ingest_kiwix.py) becomes a pin within the
+		// current viewport. We requery on every pan/zoom; 100 hits is
+		// plenty at any zoom (more would clutter without filtering by
+		// importance, which we don't have yet).
+		map.on('load', () => {
+			map.addSource('pins', {
+				type: 'geojson',
+				data: { type: 'FeatureCollection', features: [] }
+			});
+			map.addLayer({
+				id: 'pin-circles',
+				type: 'circle',
+				source: 'pins',
+				paint: {
+					'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 3, 8, 7],
+					'circle-color': '#0ea5e9',
+					'circle-stroke-width': 1.5,
+					'circle-stroke-color': '#ffffff',
+					'circle-opacity': 0.9
+				}
+			});
+			map.addLayer({
+				id: 'pin-labels',
+				type: 'symbol',
+				source: 'pins',
+				minzoom: 5,
+				layout: {
+					'text-field': ['get', 'title'],
+					'text-size': 11,
+					'text-offset': [0, 0.9],
+					'text-anchor': 'top',
+					'text-optional': true
+				},
+				paint: {
+					'text-color': '#0f172a',
+					'text-halo-color': '#ffffff',
+					'text-halo-width': 1.5
+				}
+			});
+
+			map.on('click', 'pin-circles', (e) => {
+				const f = e.features?.[0];
+				const url = f?.properties && (f.properties as { url?: string }).url;
+				if (url) window.location.href = url;
+			});
+			map.on('mouseenter', 'pin-circles', () => {
+				map.getCanvas().style.cursor = 'pointer';
+			});
+			map.on('mouseleave', 'pin-circles', () => {
+				map.getCanvas().style.cursor = '';
+			});
+
+			// Debounce: a single drag fires many move events. We want one
+			// query at the end of the gesture.
+			let pinTimer: number | undefined;
+			let pinAbort: AbortController | undefined;
+			const refreshPins = async () => {
+				pinAbort?.abort();
+				pinAbort = new AbortController();
+				const b = map.getBounds();
+				const ne = b.getNorthEast();
+				const sw = b.getSouthWest();
+				// Meili: _geoBoundingBox([top_right_lat, top_right_lng], [bottom_left_lat, bottom_left_lng])
+				const filter = `_geoBoundingBox([${ne.lat}, ${ne.lng}], [${sw.lat}, ${sw.lng}])`;
+				try {
+					const r = await fetch('/api/search', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ q: '', filter, limit: 100 }),
+						signal: pinAbort.signal
+					});
+					if (!r.ok) return;
+					const data = (await r.json()) as { hits: GeoHit[] };
+					const features = (data.hits ?? [])
+						.filter((h) => h._geo)
+						.map((h) => ({
+							type: 'Feature' as const,
+							geometry: {
+								type: 'Point' as const,
+								coordinates: [h._geo.lng, h._geo.lat]
+							},
+							properties: { title: h.title, url: articleUrl(h) }
+						}));
+					(map.getSource('pins') as maplibregl.GeoJSONSource).setData({
+						type: 'FeatureCollection',
+						features
+					});
+				} catch (err) {
+					if (err instanceof DOMException && err.name === 'AbortError') return;
+					// Network / API errors aren't fatal — pins just won't update.
+				}
+			};
+			const onMove = () => {
+				if (pinTimer) clearTimeout(pinTimer);
+				pinTimer = window.setTimeout(refreshPins, 300);
+			};
+			map.on('moveend', onMove);
+			refreshPins();
 		});
 
 		return () => {

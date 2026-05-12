@@ -212,6 +212,41 @@ def test_maps_canvas_renders_pixels(page: Any, config: dict[str, Any]) -> None:
     )
 
 
+# --- map pins (geocoded article layer) -------------------------------------
+
+def test_map_pins_query_returns_geo_hits(page: Any, config: dict[str, Any]) -> None:
+    """On load, /maps fires a Meili _geoBoundingBox query for the world
+    view and renders the results as a pin layer. We don't try to
+    inspect MapLibre's GL canvas for circles (no DOM); instead we
+    intercept the /api/search response and verify it contains geo'd
+    hits."""
+    maps = _public(config, "maps")
+
+    geo_hit_count: dict[str, int] = {"n": -1}
+
+    def grab(response: Any) -> None:
+        if "/api/search" not in response.url:
+            return
+        try:
+            body = response.json()
+        except Exception:
+            return
+        hits = body.get("hits") or []
+        with_geo = sum(1 for h in hits if h.get("_geo"))
+        if with_geo > geo_hit_count["n"]:
+            geo_hit_count["n"] = with_geo
+
+    page.on("response", grab)
+    page.goto(f"https://{maps}/maps", wait_until="networkidle", timeout=30_000)
+    page.wait_for_timeout(2500)
+
+    assert geo_hit_count["n"] >= 1, (
+        "no geo'd hits returned from /api/search on /maps. Either the "
+        "Wikipedia ingest hasn't tagged any chunk-0 docs with _geo yet, "
+        "or the map page isn't issuing the bounding-box query."
+    )
+
+
 # --- search ----------------------------------------------------------------
 
 def test_search_returns_hits(page: Any, config: dict[str, Any]) -> None:

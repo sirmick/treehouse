@@ -16,6 +16,15 @@ Document schema (matches docs/search.md, minus the embedding field):
     deeplink_path     entry path within the book, e.g. "A/Volcano"
     language          "en"
     indexed_at        ISO timestamp at ingest time
+    _geo              (optional) {lat, lng} — only on chunk 0 of articles
+                      whose HTML carries coords. Drives the map's pin
+                      layer via Meili's _geoBoundingBox filter.
+
+Wikipedia ZIMs render coords via three redundant markers; Vikidia ZIMs
+ship no coords at all. The extractor takes the first marker it finds:
+1. <span class="geo">lat; lon</span>       (machine-readable Geo µformat)
+2. <meta name="geo.position" content="lat;lon">
+3. <meta name="ICBM" content="lat, lon">
 
 Run via `make ingest`; the Makefile target downloads the ZIM if
 missing.
@@ -95,6 +104,34 @@ def chunk_text(text: str, max_chars: int = 1000) -> list[str]:
 def safe_id(s: str) -> str:
     """MeiliSearch document IDs allow [a-zA-Z0-9_-] only; sanitize the rest."""
     return re.sub(r"[^a-zA-Z0-9_-]", "_", s)[:480]
+
+
+# Three independent coord patterns. Listed in order of reliability:
+# Geo µformat is the cleanest (purpose-built, no DMS conversion); meta
+# tags are fallbacks for the rare article that omits the span.
+_GEO_PATTERNS = (
+    re.compile(r'<span[^>]*class="geo"[^>]*>\s*(-?\d+(?:\.\d+)?)\s*[;,]\s*(-?\d+(?:\.\d+)?)\s*</span>'),
+    re.compile(r'<meta\s+name="geo\.position"\s+content="\s*(-?\d+(?:\.\d+)?)\s*[;,]\s*(-?\d+(?:\.\d+)?)\s*"'),
+    re.compile(r'<meta\s+name="ICBM"\s+content="\s*(-?\d+(?:\.\d+)?)\s*[;,]\s*(-?\d+(?:\.\d+)?)\s*"'),
+)
+
+
+def extract_geo(html: str) -> tuple[float, float] | None:
+    """Return (lat, lng) if the article HTML carries coords, else None.
+
+    Sanity-clamps to valid earth-coord ranges so a junk match in a
+    template string can't poison the index with lat=500."""
+    for pat in _GEO_PATTERNS:
+        m = pat.search(html)
+        if not m:
+            continue
+        try:
+            lat, lng = float(m.group(1)), float(m.group(2))
+        except ValueError:
+            continue
+        if -90.0 <= lat <= 90.0 and -180.0 <= lng <= 180.0:
+            return lat, lng
+    return None
 
 
 def get_book_name(archive: Archive, fallback: str) -> str:
@@ -185,16 +222,20 @@ def main() -> int:
             raise
 
     index = client.index(args.index)
+    # `_geo` is a Meili-special field for geosearch. Adding it to both
+    # filterable and sortable enables `_geoBoundingBox(...)` filters
+    # (used by the map's pin layer) and `_geoPoint(...)` sort.
     index.update_settings({
         "searchableAttributes": ["title", "body", "snippet"],
-        "filterableAttributes": ["source", "kind", "language"],
-        "sortableAttributes": ["indexed_at"],
+        "filterableAttributes": ["source", "kind", "language", "_geo"],
+        "sortableAttributes": ["indexed_at", "_geo"],
     })
 
     indexed_at = dt.datetime.now(dt.timezone.utc).isoformat()
     batch: list[dict] = []
     articles_seen = 0
     chunks_indexed = 0
+    geo_articles = 0
 
     def flush() -> None:
         nonlocal batch, chunks_indexed
@@ -202,7 +243,8 @@ def main() -> int:
             return
         index.add_documents(batch)
         chunks_indexed += len(batch)
-        print(f"  +{len(batch)} chunks (running: {chunks_indexed})", file=sys.stderr)
+        print(f"  +{len(batch)} chunks (running: {chunks_indexed}, geo: {geo_articles})",
+              file=sys.stderr)
         batch = []
 
     for path, title, html in iter_html_entries(archive):
@@ -219,9 +261,16 @@ def main() -> int:
         if len(text) < 200:
             continue
 
+        # Extract geo from the raw HTML (not the stripped text — the
+        # extractor drops the span markers). Attach to chunk 0 only so
+        # one article = at most one pin on the map.
+        geo = extract_geo(html)
+        if geo is not None:
+            geo_articles += 1
+
         for ci, chunk in enumerate(chunk_text(text)):
             base = f"kiwix:{book_name}:{path}:{ci}"
-            batch.append({
+            doc: dict = {
                 "id": safe_id(base),
                 "title": title,
                 "body": chunk,
@@ -232,13 +281,17 @@ def main() -> int:
                 "deeplink_path": path,
                 "language": "en",
                 "indexed_at": indexed_at,
-            })
+            }
+            if ci == 0 and geo is not None:
+                doc["_geo"] = {"lat": geo[0], "lng": geo[1]}
+            batch.append(doc)
             if len(batch) >= args.batch_size:
                 flush()
 
     flush()
 
-    print(f"\ndone: {chunks_indexed} chunks from {articles_seen} articles -> '{args.index}'",
+    print(f"\ndone: {chunks_indexed} chunks from {articles_seen} articles "
+          f"({geo_articles} with geo) -> '{args.index}'",
           file=sys.stderr)
     return 0
 
