@@ -2,7 +2,7 @@
         bootstrap-host \
         launcher-deps launcher-config launcher-build launcher-dev \
         up down wipe-content provision shell health \
-        verify-isolation seed ingest backup restore-drill \
+        verify-isolation seed ingest tiles seed-books backup restore-drill \
         test test-schemas test-compose test-live test-all test-deps \
         toolchain clean
 
@@ -92,6 +92,9 @@ ingest:                    ## Index every ZIM into MeiliSearch (VM-side; deps in
 
 tiles:                     ## Download + extract OSM basemap PMTiles (~1 GB, slow; needs internet)
 	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible-playbook -i inventory/libvirt-qemu tiles.yml'
+
+seed-books:                ## Fetch ~200 Project Gutenberg children's books via Gutendex, import into calibre library
+	cd $(ANSIBLE_DIR) && sg libvirt -c 'ansible-playbook -i inventory/libvirt-qemu seed-books.yml'
 
 # ----- backup --------------------------------------------------------------
 backup:                    ## Trigger a one-shot restic snapshot now

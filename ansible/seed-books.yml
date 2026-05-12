@@ -1,0 +1,133 @@
+---
+# Seed the calibre library with kid-friendly Project Gutenberg books.
+# Idempotent: re-running skips already-downloaded EPUBs (file present
+# in inbox) and already-imported books (calibredb dedupes on
+# title+author against metadata.db).
+#
+# Network-dependent — gutendex.com + www.gutenberg.org are hit for
+# the catalog and EPUB downloads. We don't fail provision when this
+# play does (network blip during a make provision shouldn't break
+# the rest of the stack).
+#
+# Run via `make seed-books`. The `make ingest` follow-up indexes the
+# resulting library into MeiliSearch (phase 3).
+
+- name: Seed books library from Project Gutenberg
+  hosts: treehouse
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../treehouse.yml
+
+  vars:
+    inbox_dir: "{{ treehouse_root }}/content/books/inbox"
+    library_dir: "{{ treehouse_root }}/content/books/library"
+    manifest_path: "{{ treehouse_root }}/state/books-manifest.jsonl"
+    fetcher_path: "{{ treehouse_root }}/state/searchd/fetch_books.py"
+    venv_python: "{{ treehouse_root }}/state/searchd-venv/bin/python"
+    target_book_count: 200
+
+  tasks:
+    # calibre's CLI is ~250 MB with --no-install-recommends (skips Qt
+    # GUI bits we don't need); the calibre-web container handles
+    # everything user-facing.
+    - name: Install calibre CLI (calibredb + ebook-meta)
+      ansible.builtin.apt:
+        name: calibre
+        state: present
+        install_recommends: false
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Inbox + library dirs (calibre-web runs as 1000:1000)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "1000"
+        group: "1000"
+        mode: "0755"
+      loop:
+        - "{{ inbox_dir }}"
+        - "{{ library_dir }}"
+
+    - name: Searchd venv dir (reuse the one ingest.yml creates)
+      ansible.builtin.file:
+        path: "{{ treehouse_root }}/state/searchd"
+        state: directory
+        owner: "{{ treehouse_user }}"
+        group: "{{ treehouse_group }}"
+        mode: "0755"
+
+    - name: Copy fetcher script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../treehouse/searchd/fetch_books.py"
+        dest: "{{ fetcher_path }}"
+        owner: "{{ treehouse_user }}"
+        group: "{{ treehouse_group }}"
+        mode: "0644"
+
+    # fetch_books.py is stdlib-only (no extra pip deps); use system
+    # python rather than the searchd venv to avoid coupling. But if
+    # the venv is already there, prefer it — same python version
+    # everywhere, lets `make ingest` and `make seed-books` share
+    # ground.
+    - name: Choose python interpreter (prefer searchd venv if present)
+      ansible.builtin.stat:
+        path: "{{ venv_python }}"
+      register: venv_stat
+
+    - name: Fetch Gutenberg children's books
+      ansible.builtin.command:
+        cmd: >-
+          {{ venv_python if venv_stat.stat.exists else '/usr/bin/python3' }}
+          {{ fetcher_path }}
+          --inbox {{ inbox_dir }}
+          --manifest {{ manifest_path }}
+          --target {{ target_book_count }}
+      register: fetch_result
+      changed_when: "'fetched' in fetch_result.stderr"
+      # Catalog fetch + downloads can take several minutes on first
+      # run; cap at 15 min to bound runaway.
+      timeout: 900
+
+    - name: Import EPUBs into calibre library
+      # `calibredb add --recurse` walks inbox/ and adds each .epub.
+      # `--automerge ignore` skips duplicates instead of error-exiting,
+      # which is how we make this idempotent. We run as root and
+      # chown after — the calibre-web container needs UID 1000
+      # ownership for the bind mount, but no `treehouse` user
+      # exists at that UID.
+      ansible.builtin.command:
+        cmd: >-
+          /usr/bin/calibredb add
+          --library-path {{ library_dir }}
+          --recurse
+          --automerge ignore
+          {{ inbox_dir }}
+      register: calibredb_add
+      changed_when: "'Added book ids' in (calibredb_add.stdout | default(''))"
+
+    - name: Fix library ownership for the calibre-web container (UID 1000)
+      ansible.builtin.file:
+        path: "{{ library_dir }}"
+        owner: "1000"
+        group: "1000"
+        recurse: true
+
+    # Point calibre-web at the library inside its container view AND
+    # enable anonymous browse so kids hit the catalog directly instead
+    # of a login wall. Admin (admin / admin123) is still there for
+    # backend management; kids only get the read-only catalog view.
+    - name: Configure calibre-web library + anonymous browse (idempotent SQL)
+      ansible.builtin.command:
+        cmd: >-
+          sqlite3 {{ treehouse_root }}/state/calibre-config/app.db
+          "update settings set config_calibre_dir = '/books', config_anonbrowse = 1"
+      register: calibre_config_update
+      changed_when: true
+
+    - name: Restart calibre-web so it picks up the new library path
+      ansible.builtin.command:
+        cmd: docker restart treehouse-calibre-web
+      changed_when: true
