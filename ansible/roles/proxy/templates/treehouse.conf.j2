@@ -154,10 +154,13 @@ server {
 
         # Inject the topbar into HTML responses. Clear Accept-Encoding
         # so calibre-web sends plain HTML (sub_filter can't read gzip).
+        # The inline <style> hides calibre-web's own search bar (and
+        # its "Advanced Search" sibling) — the Treehouse top bar
+        # provides cross-source search and we don't want two of them.
         proxy_set_header Accept-Encoding "";
         sub_filter_once on;
         sub_filter_types text/html;
-        sub_filter '</head>' '<script>window.__TREEHOUSE_TOPBAR__={{ topbar_config }};</script><script src="/topbar.js" defer></script></head>';
+        sub_filter '</head>' '<style>form.navbar-form[role=search],a[href="/advanced_search"]{display:none!important}</style><script>window.__TREEHOUSE_TOPBAR__={{ topbar_config }};</script><script src="/topbar.js" defer></script></head>';
     }
 }
 

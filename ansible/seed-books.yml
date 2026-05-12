@@ -115,15 +115,19 @@
         group: "1000"
         recurse: true
 
-    # Point calibre-web at the library inside its container view AND
-    # enable anonymous browse so kids hit the catalog directly instead
-    # of a login wall. Admin (admin / admin123) is still there for
-    # backend management; kids only get the read-only catalog view.
-    - name: Configure calibre-web library + anonymous browse (idempotent SQL)
+    # Point calibre-web at the library, enable anonymous browse, and
+    # grant the Guest user the bits a kid needs:
+    #   role: 32 (anonymous) | 2 (download) | 256 (viewer = read in browser) = 290
+    #   sidebar_view: 262143 (all bits, same as admin)
+    # Without these the catalog browses fine but /read/<id>/epub
+    # returns 403 and no Read button appears on the book detail page.
+    # Admin (admin / admin123) is still there for backend management.
+    - name: Configure calibre-web library + anonymous browse + Guest perms
       ansible.builtin.command:
         cmd: >-
           sqlite3 {{ treehouse_root }}/state/calibre-config/app.db
-          "update settings set config_calibre_dir = '/books', config_anonbrowse = 1"
+          "update settings set config_calibre_dir = '/books', config_anonbrowse = 1;
+           update user set role = 290, sidebar_view = 262143 where name = 'Guest';"
       register: calibre_config_update
       changed_when: true
 
