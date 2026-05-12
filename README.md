@@ -109,6 +109,7 @@ Design docs live in [`docs/`](docs/):
 - [search.md](docs/search.md) — aggregator, schema, ranking
 - [ai.md](docs/ai.md) — local AI, RAG, prompts, guardrails
 - [operations.md](docs/operations.md) — backup, observability, maintenance
+- [books.md](docs/books.md) — planned ebook track (Calibre-web + Standard Ebooks)
 - [MILESTONE-1.md](docs/MILESTONE-1.md) — operator runbook for the first runnable slice
 - [commands.md](docs/commands.md) — every `make` target, what it does, when to run it
 
