@@ -1,6 +1,10 @@
 <script lang="ts">
 	import { activeHost, hostnames } from '$lib/config';
 
+	// On search-kids, `/` redirects to `/search` — so the Home link
+	// has to point at the home FQDN, not at a relative `/`.
+	const homeHref = `http://${activeHost('home')}/`;
+
 	type Hit = {
 		id: string;
 		title: string;
@@ -79,7 +83,7 @@
 	<div class="mx-auto max-w-3xl">
 		<header class="mb-8 flex items-center justify-between">
 			<a
-				href="/"
+				href={homeHref}
 				class="text-sm font-medium text-slate-500 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300"
 			>
 				← Home

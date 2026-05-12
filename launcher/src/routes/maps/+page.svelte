@@ -4,6 +4,11 @@
 	import 'maplibre-gl/dist/maplibre-gl.css';
 	import { Protocol } from 'pmtiles';
 	import { layers, namedFlavor } from '@protomaps/basemaps';
+	import { activeHost } from '$lib/config';
+
+	// On map-kids, `/` redirects back to `/maps` — so the Home link
+	// has to point at the home FQDN, not at a relative `/`.
+	const homeHref = `http://${activeHost('home')}/`;
 
 	let container: HTMLDivElement;
 	let tilesMissing = $state(false);
@@ -71,7 +76,7 @@
 <main class="flex min-h-screen flex-col px-4 py-8 sm:px-8 sm:py-10">
 	<header class="mx-auto mb-6 flex w-full max-w-5xl items-center justify-between">
 		<a
-			href="/"
+			href={homeHref}
 			class="text-sm font-medium text-slate-500 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-sky-300"
 		>
 			← Home
